@@ -13,9 +13,10 @@ from backend.main import app as _fastapi_app
 class VercelPathFixer:
     """
     ASGI middleware for Vercel Serverless execution.
-    Vercel rewrites /api/(.*) -> /api/index.py?_path=$1.
-    This middleware extracts _path and restores the exact API route
-    (e.g. /api/auth/login) in the ASGI scope before FastAPI dispatch.
+    Restores the clean path in scope['path'] before FastAPI dispatch:
+    - _api_path / _path for API routes (e.g. /api/auth/login)
+    - root / fallback paths
+    - Fallback headers (x-matched-path, x-forwarded-uri)
     """
     def __init__(self, app):
         self.app = app
@@ -24,11 +25,26 @@ class VercelPathFixer:
         if scope.get("type") in ("http", "websocket"):
             query_string = scope.get("query_string", b"").decode("utf-8", "ignore")
             
-            if "_path=" in query_string:
+            if "_api_path=" in query_string:
+                params = parse_qs(query_string, keep_blank_values=True)
+                if "_api_path" in params:
+                    extracted = params.pop("_api_path")[0]
+                    clean_path = "/api/" + extracted.lstrip("/")
+                    scope["path"] = clean_path
+                    scope["raw_path"] = clean_path.encode("utf-8")
+                    scope["query_string"] = urlencode(params, doseq=True).encode("utf-8")
+            elif "_path=" in query_string:
                 params = parse_qs(query_string, keep_blank_values=True)
                 if "_path" in params:
                     extracted = params.pop("_path")[0]
-                    clean_path = "/api/" + extracted.lstrip("/")
+                    if extracted.startswith("api/") or extracted.startswith("/api/"):
+                        clean_path = "/" + extracted.lstrip("/")
+                    elif extracted in ("", "/"):
+                        clean_path = "/"
+                    elif extracted.startswith("assets/") or extracted == "index.html":
+                        clean_path = "/" + extracted.lstrip("/")
+                    else:
+                        clean_path = "/api/" + extracted.lstrip("/")
                     scope["path"] = clean_path
                     scope["raw_path"] = clean_path.encode("utf-8")
                     scope["query_string"] = urlencode(params, doseq=True).encode("utf-8")

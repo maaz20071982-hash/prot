@@ -2654,10 +2654,10 @@ for _route in list(app.routes):
 
 
 # ---------------------------------------------------------------------------
-# 12. Production Static Frontend Serving (Local & Single-Server Deployments)
+# 12. Production Static Frontend Serving
 # ---------------------------------------------------------------------------
 _frontend_dist = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "frontend", "dist"))
-if os.path.exists(_frontend_dist) and "VERCEL" not in os.environ and "NOW_REGION" not in os.environ:
+if os.path.exists(_frontend_dist):
     from fastapi.staticfiles import StaticFiles  # type: ignore
     from fastapi.responses import FileResponse  # type: ignore
 
@@ -2665,13 +2665,32 @@ if os.path.exists(_frontend_dist) and "VERCEL" not in os.environ and "NOW_REGION
     if os.path.exists(_assets_dir):
         app.mount("/assets", StaticFiles(directory=_assets_dir), name="assets")
 
-    @app.get("/{full_path:path}")
-    async def serve_frontend_spa(full_path: str):
-        if full_path.startswith("api") or full_path.startswith("docs") or full_path.startswith("openapi.json"):
+    @app.get("/")
+    async def serve_root():
+        index_file = os.path.join(_frontend_dist, "index.html")
+        if os.path.exists(index_file):
+            return FileResponse(index_file)
+        return {"status": "ok", "app": "THERMOSENSE"}
+
+    @app.get("/index.html")
+    async def serve_index_html():
+        index_file = os.path.join(_frontend_dist, "index.html")
+        if os.path.exists(index_file):
+            return FileResponse(index_file)
+        raise HTTPException(status_code=404, detail="Not Found")
+
+    @app.api_route("/{full_path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD"])
+    async def serve_frontend_spa(request: Request, full_path: str):
+        if full_path.startswith("api/") or full_path == "api" or full_path.startswith("docs") or full_path.startswith("openapi.json"):
             raise HTTPException(status_code=404, detail="Not Found")
+        if request.method not in ("GET", "HEAD"):
+            raise HTTPException(status_code=405, detail="Method Not Allowed")
         file_path = os.path.join(_frontend_dist, full_path)
         if os.path.exists(file_path) and os.path.isfile(file_path):
             return FileResponse(file_path)
-        return FileResponse(os.path.join(_frontend_dist, "index.html"))
+        index_file = os.path.join(_frontend_dist, "index.html")
+        if os.path.exists(index_file):
+            return FileResponse(index_file)
+        raise HTTPException(status_code=404, detail="Not Found")
 
 

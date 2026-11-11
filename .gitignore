@@ -17,8 +17,9 @@ htmlcov/
 *.log
 
 # Build outputs
-dist/
 build/
+!frontend/dist/
+!frontend/dist/**
 
 # Environment variables & secrets
 .env
