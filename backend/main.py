@@ -101,20 +101,6 @@ app.add_middleware(
 )
 
 
-@app.middleware("http")
-async def vercel_path_normalizer(request: Request, call_next):
-    # Normalize paths when deployed on Vercel
-    matched = request.headers.get("x-matched-path") or request.headers.get("x-forwarded-uri")
-    if matched:
-        clean = matched.split("?")[0]
-        if not clean.startswith("/api"):
-            clean = "/api" + clean
-        request.scope["path"] = clean
-    elif not request.scope.get("path", "").startswith("/api"):
-        request.scope["path"] = "/api" + request.scope.get("path", "")
-    return await call_next(request)
-
-
 # ---------------------------------------------------------------------------
 # WebSocket Connection Manager for Live Telemetry Feed
 # ---------------------------------------------------------------------------
@@ -2643,7 +2629,7 @@ async def websocket_live_feed(websocket: WebSocket):
 # 12. Production Static Frontend Serving (24x7 Deployment)
 # ---------------------------------------------------------------------------
 _frontend_dist = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "frontend", "dist"))
-if os.path.exists(_frontend_dist) and "VERCEL" not in os.environ:
+if os.path.exists(_frontend_dist):
     from fastapi.staticfiles import StaticFiles  # type: ignore
     from fastapi.responses import FileResponse  # type: ignore
 
