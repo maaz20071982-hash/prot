@@ -2626,6 +2626,21 @@ async def websocket_live_feed(websocket: WebSocket):
 
 
 # ---------------------------------------------------------------------------
+# Debug Endpoint for Vercel Serverless Routing Inspection
+# ---------------------------------------------------------------------------
+@app.api_route("/api/debug", methods=["GET", "POST"])
+@app.api_route("/debug", methods=["GET", "POST"])
+@app.api_route("/api/index.py", methods=["GET", "POST"])
+def debug_endpoint(request: Request):
+    return {
+        "url_path": request.url.path,
+        "method": request.method,
+        "headers": dict(request.headers),
+        "scope_path": request.scope.get("path")
+    }
+
+
+# ---------------------------------------------------------------------------
 # 11b. Dual Route Aliases (Ensures matching with or without /api prefix)
 # ---------------------------------------------------------------------------
 for _route in list(app.routes):
