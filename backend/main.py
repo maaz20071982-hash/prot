@@ -101,6 +101,20 @@ app.add_middleware(
 )
 
 
+@app.middleware("http")
+async def vercel_path_normalizer(request: Request, call_next):
+    # Normalize paths when deployed on Vercel
+    matched = request.headers.get("x-matched-path") or request.headers.get("x-forwarded-uri")
+    if matched:
+        clean = matched.split("?")[0]
+        if not clean.startswith("/api"):
+            clean = "/api" + clean
+        request.scope["path"] = clean
+    elif not request.scope.get("path", "").startswith("/api"):
+        request.scope["path"] = "/api" + request.scope.get("path", "")
+    return await call_next(request)
+
+
 # ---------------------------------------------------------------------------
 # WebSocket Connection Manager for Live Telemetry Feed
 # ---------------------------------------------------------------------------

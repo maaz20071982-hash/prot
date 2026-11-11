@@ -27,11 +27,28 @@ _FERNET_KEY = b"uF8w1c4P_z9lV_m9G2a7Y6q8X1s3D5f7J9k0L2z4X6c="
 _cipher = Fernet(_FERNET_KEY)
 
 
+_db_initialized = False
+
+
 def get_db() -> sqlite3.Connection:
+    global _db_initialized
     conn = sqlite3.connect(DB_PATH, timeout=30.0)
     conn.execute("PRAGMA journal_mode=WAL;")
     conn.execute("PRAGMA busy_timeout = 30000;")
     conn.row_factory = sqlite3.Row
+    
+    if not _db_initialized:
+        try:
+            cursor = conn.cursor()
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='users'")
+            if not cursor.fetchone():
+                _db_initialized = True
+                seed_db()
+            else:
+                _db_initialized = True
+        except Exception:
+            _db_initialized = True
+            
     return conn
 
 
