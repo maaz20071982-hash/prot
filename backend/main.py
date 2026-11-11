@@ -2626,10 +2626,23 @@ async def websocket_live_feed(websocket: WebSocket):
 
 
 # ---------------------------------------------------------------------------
-# 12. Production Static Frontend Serving (24x7 Deployment)
+# 11b. Dual Route Aliases (Ensures matching with or without /api prefix)
+# ---------------------------------------------------------------------------
+for _route in list(app.routes):
+    _path = getattr(_route, "path", "")
+    if _path.startswith("/api/"):
+        _alias_path = _path[4:]  # e.g. /auth/login
+        _endpoint = getattr(_route, "endpoint", None)
+        _methods = getattr(_route, "methods", ["GET"])
+        if _endpoint and not any(getattr(_r, "path", "") == _alias_path for _r in app.routes):
+            app.add_api_route(_alias_path, _endpoint, methods=_methods, include_in_schema=False)
+
+
+# ---------------------------------------------------------------------------
+# 12. Production Static Frontend Serving (Local & Single-Server Deployments)
 # ---------------------------------------------------------------------------
 _frontend_dist = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "frontend", "dist"))
-if os.path.exists(_frontend_dist):
+if os.path.exists(_frontend_dist) and "VERCEL" not in os.environ and "NOW_REGION" not in os.environ:
     from fastapi.staticfiles import StaticFiles  # type: ignore
     from fastapi.responses import FileResponse  # type: ignore
 
@@ -2645,4 +2658,5 @@ if os.path.exists(_frontend_dist):
         if os.path.exists(file_path) and os.path.isfile(file_path):
             return FileResponse(file_path)
         return FileResponse(os.path.join(_frontend_dist, "index.html"))
+
 
