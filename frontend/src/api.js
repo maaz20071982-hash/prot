@@ -3,7 +3,9 @@
  * Wraps backend endpoints with token injection and error handling.
  */
 
-const BASE_URL = '/api';
+const BASE_URL = (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_API_BASE_URL) 
+  ? import.meta.env.VITE_API_BASE_URL 
+  : '/api';
 
 function getAuthHeader() {
   const token = localStorage.getItem('thermosense_token');

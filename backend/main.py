@@ -2623,3 +2623,26 @@ async def websocket_live_feed(websocket: WebSocket):
             await websocket.send_json({"type": "PONG", "time": datetime.now(timezone.utc).isoformat()})
     except WebSocketDisconnect:
         manager.disconnect(websocket)
+
+
+# ---------------------------------------------------------------------------
+# 12. Production Static Frontend Serving (24x7 Deployment)
+# ---------------------------------------------------------------------------
+_frontend_dist = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "frontend", "dist"))
+if os.path.exists(_frontend_dist):
+    from fastapi.staticfiles import StaticFiles  # type: ignore
+    from fastapi.responses import FileResponse  # type: ignore
+
+    _assets_dir = os.path.join(_frontend_dist, "assets")
+    if os.path.exists(_assets_dir):
+        app.mount("/assets", StaticFiles(directory=_assets_dir), name="assets")
+
+    @app.get("/{full_path:path}")
+    async def serve_frontend_spa(full_path: str):
+        if full_path.startswith("api") or full_path.startswith("docs") or full_path.startswith("openapi.json"):
+            raise HTTPException(status_code=404, detail="Not Found")
+        file_path = os.path.join(_frontend_dist, full_path)
+        if os.path.exists(file_path) and os.path.isfile(file_path):
+            return FileResponse(file_path)
+        return FileResponse(os.path.join(_frontend_dist, "index.html"))
+
