@@ -2629,7 +2629,7 @@ async def websocket_live_feed(websocket: WebSocket):
 # 12. Production Static Frontend Serving (24x7 Deployment)
 # ---------------------------------------------------------------------------
 _frontend_dist = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "frontend", "dist"))
-if os.path.exists(_frontend_dist):
+if os.path.exists(_frontend_dist) and "VERCEL" not in os.environ:
     from fastapi.staticfiles import StaticFiles  # type: ignore
     from fastapi.responses import FileResponse  # type: ignore
 
