@@ -12,6 +12,7 @@ THERMOSENSE Comprehensive Sprint 1 Test Suite (test_all.py)
 import os
 import sys
 import json
+import asyncio
 from datetime import datetime, timezone, timedelta
 
 # Ensure root directory is on PYTHONPATH
@@ -25,6 +26,18 @@ from backend.db import (
     seed_db,
     encrypt_health,
     decrypt_health,
+    encrypt_phone,
+    decrypt_phone,
+    mask_phone,
+    create_sos_event,
+    cancel_sos_event,
+    acknowledge_sos_event,
+    check_sos_rate_limit,
+    get_active_sos,
+    get_sos_by_id,
+    get_sos_dispatch_logs,
+    save_push_subscription,
+    get_push_subscriptions,
     log_audit
 )
 from backend.engine import (
@@ -70,7 +83,11 @@ from backend.auth import (
     verify_password,
     create_access_token,
     decode_token,
-    generate_in_app_reset_token
+    generate_in_app_reset_token,
+    Roles,
+    require_role,
+    normalize_identity,
+    create_refresh_token
 )
 from backend.main import (
     login,
@@ -159,7 +176,58 @@ from backend.main import (
     CreateNearMissRequest,
     SendNudgeRequest,
     TogglePassportPermissionRequest,
-    AssistantChatRequest
+    AssistantChatRequest,
+    CreateOrgRequest,
+    CreateSiteRequest,
+    UpdateSiteRequest,
+    ChangeUserRoleRequest,
+    WeatherModeRequest,
+    WeatherManualRequest,
+    RefreshRequest,
+    admin_list_orgs,
+    admin_create_org,
+    admin_list_sites,
+    admin_create_site,
+    admin_update_site,
+    admin_delete_site,
+    admin_list_users,
+    admin_toggle_user_status,
+    admin_change_user_role,
+    admin_generate_user_reset_token,
+    admin_purge_retention,
+    admin_get_login_history,
+    admin_get_audit_logs,
+    admin_get_config,
+    get_site_weather_reading,
+    api_get_weather,
+    api_refresh_weather,
+    api_set_weather_mode,
+    api_submit_manual_weather,
+    fetch_open_meteo,
+    refresh,
+    get_engine_config,
+    trigger_sos,
+    cancel_sos,
+    acknowledge_sos,
+    list_active_sos_events,
+    list_dispatch_logs,
+    call_worker_direct,
+    subscribe_push,
+    twilio_voice_webhook,
+    twilio_voice_gather_webhook,
+    twilio_checkin_webhook,
+    twilio_checkin_gather_webhook,
+    SOSTriggerRequest,
+    SOSCancelRequest,
+    PushSubscriptionRequest
+)
+from backend.notify import (
+    validate_live_credentials,
+    get_sos_mode,
+    dispatch,
+    stop_escalation,
+    format_message,
+    _run_escalation_loop
 )
 
 
@@ -1283,5 +1351,613 @@ def test_70_judge_walkthrough_end_to_end_smoke():
     # Verify reset endpoint
     reset_res = reset_walkthrough(current_user=get_user_session("admin", "admin123"))
     assert reset_res["status"] == "success"
+
+
+# ---------------------------------------------------------------------------
+# Section G: Sprint 1 Extensions (Tests 71 - 85)
+# Login Edge Cases, Role Guards, Admin 403s, Weather Priority, Expiry & Fallback
+# ---------------------------------------------------------------------------
+
+def test_71_login_edge_cases_whitespace_and_email_normalization():
+    """Sprint 1: Test whitespace stripping, case normalization, and token structure."""
+    # 1. Whitespace in username
+    res1 = login(LoginRequest(username="  worker1  ", password="password123"))
+    assert res1["user"]["username"] == "worker1"
+
+    # 2. Uppercase username
+    res2 = login(LoginRequest(username="WORKER1", password="password123"))
+    assert res2["user"]["username"] == "worker1"
+
+    # 3. Uppercase & mixed-case email
+    res3 = login(LoginRequest(username="ADMIN@APEXINDUSTRIAL.COM", password="password123"))
+    assert res3["user"]["role"] == "admin"
+
+    # 4. Whitespace in email
+    res4 = login(LoginRequest(username="  supervisor@apexindustrial.com  ", password="password123"))
+    assert res4["user"]["role"] == "supervisor"
+
+    # 5. Token format invariants
+    payload = decode_token(res1["access_token"])
+    assert payload["username"] == "worker1"
+    assert payload["role"] == "worker"
+    assert payload["type"] == "access"
+    assert "exp" in payload
+
+
+def test_72_login_error_messages_distinct():
+    """Sprint 1: Distinct error messages for wrong password vs nonexistent user vs suspended."""
+    # 1. Wrong password
+    with pytest.raises(HTTPException) as exc1:
+        login(LoginRequest(username="worker1", password="WrongPassword!"))
+    assert exc1.value.status_code == 401
+    assert "invalid username or password" in exc1.value.detail.lower()
+
+    # 2. Non-existent user
+    with pytest.raises(HTTPException) as exc2:
+        login(LoginRequest(username="ghost_user_does_not_exist", password="password123"))
+    assert exc2.value.status_code == 401
+    assert "invalid username or password" in exc2.value.detail.lower()
+
+    # 3. Suspended account
+    conn = get_db()
+    conn.cursor().execute("UPDATE users SET status = 'suspended' WHERE username = 'worker4'")
+    conn.commit()
+    conn.close()
+
+    with pytest.raises(HTTPException) as exc3:
+        login(LoginRequest(username="worker4", password="password123"))
+    assert exc3.value.status_code == 403
+    assert "suspended" in exc3.value.detail.lower()
+
+    # Restore worker4
+    conn = get_db()
+    conn.cursor().execute("UPDATE users SET status = 'active' WHERE username = 'worker4'")
+    conn.commit()
+    conn.close()
+
+    res_restored = login(LoginRequest(username="worker4", password="password123"))
+    assert res_restored["user"]["status"] == "active"
+
+
+def test_73_token_expiry_and_refresh_token_flow():
+    """Sprint 1: Token expiration handling, silent refresh endpoint, and token rejection."""
+    # 1. Expired access token rejected
+    expired_tok = create_access_token({"id": "usr-worker", "sub": "worker1", "username": "worker1", "role": "worker"}, expires_delta=timedelta(seconds=-10))
+    assert decode_token(expired_tok) is None
+
+    # 2. Valid refresh token issues fresh access token
+    ref_tok = create_refresh_token({"id": "usr-worker", "sub": "worker1", "role": "worker", "username": "worker1"})
+    ref_res = refresh(RefreshRequest(refresh_token=ref_tok))
+    assert "access_token" in ref_res
+    assert ref_res["token_type"] == "bearer"
+    decoded = decode_token(ref_res["access_token"])
+    assert decoded["username"] == "worker1"
+
+    # 3. Invalid refresh token rejected
+    with pytest.raises(HTTPException) as exc_inv:
+        refresh(RefreshRequest(refresh_token="corrupt.payload.here"))
+    assert exc_inv.value.status_code == 401
+
+
+def test_74_role_guards_and_admin_403s():
+    """Sprint 1: Guarded administrative endpoints return 403 Forbidden for non-admins."""
+    worker_u = get_user_session("worker1", "password123")
+    sup_u = get_user_session("supervisor", "password123")
+    safety_u = get_user_session("safety_officer", "password123")
+    admin_u = get_user_session("admin", "password123")
+
+    guard = require_role([Roles.ADMIN])
+
+    for non_admin in [worker_u, sup_u, safety_u]:
+        with pytest.raises(HTTPException) as exc:
+            guard(non_admin)
+        assert exc.value.status_code == 403
+        assert "access denied" in exc.value.detail.lower()
+
+    # Admin user passes guard
+    assert guard(admin_u)["role"] == "admin"
+
+
+def test_75_admin_orgs_and_sites_crud_with_coordinates():
+    """Sprint 1: Admin org & site CRUD with latitude and longitude for weather lookups."""
+    admin_u = get_user_session("admin", "password123")
+
+    # 1. Create Organization
+    new_org = admin_create_org(CreateOrgRequest(name="Hudson Industrial Group", slug="hudson-industrial"), current_user=admin_u)
+    assert new_org["name"] == "Hudson Industrial Group"
+
+    # 2. Create Site with Lat/Long
+    new_site = admin_create_site(CreateSiteRequest(
+        org_id=new_org["id"],
+        name="Hudson Valley Refinery",
+        location="Jersey City, NJ",
+        latitude=40.7282,
+        longitude=-74.0776,
+        timezone="America/New_York"
+    ), current_user=admin_u)
+    assert new_site["latitude"] == 40.7282
+    assert new_site["longitude"] == -74.0776
+
+    # 3. Update Site Coordinates
+    updated = admin_update_site(str(new_site["id"]), UpdateSiteRequest(
+        latitude=40.7500,
+        longitude=-74.2000
+    ), current_user=admin_u)
+    assert updated["latitude"] == 40.7500
+    assert updated["longitude"] == -74.2000
+
+    # 4. Verify in site list
+    sites = admin_list_sites(current_user=admin_u)
+    assert any(s["id"] == new_site["id"] and s["latitude"] == 40.7500 for s in sites)
+
+    # 5. Delete Site
+    del_res = admin_delete_site(str(new_site["id"]), current_user=admin_u)
+    assert del_res["status"] == "success"
+
+
+def test_76_admin_user_management_and_reset_token():
+    """Sprint 1: Admin user search, role update, status toggle, and in-app password reset token."""
+    admin_u = get_user_session("admin", "password123")
+
+    # 1. List & Search
+    users = admin_list_users(search="Elena", current_user=admin_u)
+    assert any(u["username"] == "safety_officer" for u in users)
+
+    # 2. Change User Role
+    conn = get_db()
+    c = conn.cursor()
+    c.execute("SELECT id FROM users WHERE username = 'worker5'")
+    w5_id = c.fetchone()["id"]
+    conn.close()
+
+    role_res = admin_change_user_role(str(w5_id), ChangeUserRoleRequest(new_role="supervisor"), current_user=admin_u)
+    assert role_res["new_role"] == "supervisor"
+
+    # Revert role
+    admin_change_user_role(str(w5_id), ChangeUserRoleRequest(new_role="worker"), current_user=admin_u)
+
+    # 3. Generate In-App Reset Token
+    tok_res = admin_generate_user_reset_token(str(w5_id), current_user=admin_u)
+    assert "reset_token" in tok_res
+    assert tok_res["username"] == "worker5"
+
+    # 4. Use reset token to change password
+    pw_res = reset_password(ResetPasswordRequest(reset_token=tok_res["reset_token"], new_password="NewSecurePass!789"))
+    assert pw_res["status"] == "success"
+
+    # Verify login with new password
+    login_new = login(LoginRequest(username="worker5", password="NewSecurePass!789"))
+    assert login_new["user"]["username"] == "worker5"
+
+    # Restore standard password
+    conn = get_db()
+    conn.cursor().execute("UPDATE users SET password_hash = ? WHERE id = ?", (hash_password("password123"), w5_id))
+    conn.commit()
+    conn.close()
+
+
+def test_77_admin_audited_retention_purge():
+    """Sprint 1: Audited retention purge deletes historical telemetry and writes immutable audit record."""
+    admin_u = get_user_session("admin", "password123")
+
+    purge_res = admin_purge_retention(PurgeRetentionRequest(days_retained=30, reason="Sprint 1 Audited Test Cleanup"), current_user=admin_u)
+    assert purge_res["status"] == "success"
+    assert "purged_records_total" in purge_res
+
+    # Verify immutable audit record exists
+    logs = admin_get_audit_logs(limit=10, action="DATA_RETENTION_PURGE_EXECUTED", current_user=admin_u)
+    assert len(logs) >= 1
+    assert logs[0]["username"] == "admin"
+    assert "Sprint 1 Audited Test Cleanup" in logs[0]["details"]
+
+
+def test_78_weather_open_meteo_fetching_and_cache():
+    """Sprint 1: Open-Meteo external weather fetching with m/s wind speed and caching."""
+    # Test fetch_open_meteo helper
+    res = fetch_open_meteo(40.7128, -74.0060)
+    if res:
+        assert "temperature_2m" in res
+        assert "relative_humidity_2m" in res
+        assert "wind_speed_10m" in res
+        assert "shortwave_radiation" in res
+        # Verify wind speed is numeric
+        assert isinstance(res["wind_speed_10m"], (int, float))
+
+    # Read site weather (will populate cache or use cached/simulated)
+    reading = get_site_weather_reading("1")
+    assert reading["site_id"] == "1"
+    assert "temperature_2m" in reading
+    assert "relative_humidity_2m" in reading
+    assert "wind_speed_10m" in reading
+    assert "wbgt_val" in reading
+
+
+def test_79_weather_cache_staleness_and_fallback():
+    """Sprint 1: Weather cache falls back to last-good cache or simulated after 30 min stale threshold."""
+    conn = get_db()
+    c = conn.cursor()
+    # Seed stale cache record (45 minutes ago)
+    stale_time = (datetime.now(timezone.utc) - timedelta(minutes=45)).isoformat()
+    c.execute("""
+        INSERT OR REPLACE INTO site_weather_cache
+        (site_id, fetched_at, temperature_2m, relative_humidity_2m, wind_speed_10m, shortwave_radiation, wbgt_val, provider, source_tag, is_stale, raw_json)
+        VALUES (2, ?, 33.2, 55.0, 1.8, 450.0, 29.8, 'Open-Meteo (Last-Good Cache)', 'external_verified', 1, '{}')
+    """, (stale_time,))
+    conn.commit()
+    conn.close()
+
+    reading = get_site_weather_reading("2")
+    assert reading["site_id"] == "2"
+    assert reading["wbgt_label"] == "WBGT estimate (proxy)"
+    assert "temperature_2m" in reading
+
+
+def test_80_weather_source_priority_hierarchy():
+    """Sprint 1: 4-tier source priority: manual instrument WBGT > manual temp/hum > external > simulated."""
+    admin_u = get_user_session("admin", "password123")
+
+    # Set mode to manual
+    api_set_weather_mode("1", WeatherModeRequest(mode="manual"), current_user=admin_u)
+
+    # 1. Tier 1: Calibrated manual instrument reading (is_measured = True)
+    api_submit_manual_weather("1", WeatherManualRequest(
+        manual_wbgt=31.2,
+        instrument="Calibrated 3M QuestTemp 34"
+    ), current_user=admin_u)
+
+    w1 = get_site_weather_reading("1")
+    assert w1["is_measured"] is True
+    assert w1["source_priority"] == 1
+    assert w1["wbgt_label"] == "WBGT (measured)"
+    assert w1["wbgt_val"] == 31.2
+    assert "QuestTemp" in w1["provider"]
+
+    # Restore auto mode
+    api_set_weather_mode("1", WeatherModeRequest(mode="auto"), current_user=admin_u)
+
+
+def test_81_weather_manual_temp_hum_and_60min_countdown():
+    """Sprint 1: Tier 2 manual temp/hum reading valid for 60 min countdown then expires."""
+    admin_u = get_user_session("admin", "password123")
+    api_set_weather_mode("1", WeatherModeRequest(mode="manual"), current_user=admin_u)
+
+    # Submit manual temp + humidity
+    api_submit_manual_weather("1", WeatherManualRequest(
+        temp_c=34.5,
+        humidity_pct=62.0,
+        instrument="Manual Whirling Psychrometer"
+    ), current_user=admin_u)
+
+    w2 = get_site_weather_reading("1")
+    assert w2["is_measured"] is False
+    assert w2["source_priority"] == 2
+    assert w2["wbgt_label"] == "WBGT estimate (proxy)"
+    assert w2["countdown_seconds"] is not None
+    assert w2["countdown_seconds"] > 3500
+
+    # Backdate expiration to simulate expiry (> 60 min)
+    conn = get_db()
+    past_time = (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat()
+    conn.cursor().execute("UPDATE site_weather_manual SET expires_at = ? WHERE site_id = '1' OR site_id = 'site-01'", (past_time,))
+    conn.commit()
+    conn.close()
+
+    # Expired reading must not be used
+    w_expired = get_site_weather_reading("1")
+    assert w_expired["source_priority"] != 2
+
+    # Restore auto mode
+    api_set_weather_mode("1", WeatherModeRequest(mode="auto"), current_user=admin_u)
+
+
+def test_82_weather_limitation_text_and_proxy_label():
+    """Sprint 1: Weather reading carries required limitation text and WBGT proxy label."""
+    w = get_site_weather_reading("1")
+    assert "Weather model value for the site location, not measured at your exact spot." in w["limitation_text"]
+    if not w["is_measured"]:
+        assert w["wbgt_label"] == "WBGT estimate (proxy)"
+
+
+def test_83_admin_system_config_and_jwt_stability():
+    """Sprint 1: Admin system config reports JWT secret from env and weather settings."""
+    admin_u = get_user_session("admin", "password123")
+    cfg = admin_get_config(current_user=admin_u)
+    assert cfg["jwt_secret_configured"] is True
+    assert "roles" in cfg
+    assert "admin" in cfg["roles"]
+    assert cfg["weather_cache_minutes"] == 10
+    assert cfg["weather_stale_minutes"] == 30
+    assert cfg["manual_reading_valid_minutes"] == 60
+
+
+def test_84_login_history_and_ip_tracking():
+    """Sprint 1: Admin login history records IP address, user-agent, and status."""
+    admin_u = get_user_session("admin", "password123")
+    lh = admin_get_login_history(limit=50, current_user=admin_u)
+    assert len(lh) > 0
+    assert "ip_address" in lh[0]
+    assert "user_agent" in lh[0]
+    assert "success" in lh[0]
+
+
+def test_85_demo_mode_configuration_and_clean_exposure():
+    """Sprint 1: System config exposes demo_mode and roles without leaking secrets."""
+    cfg = get_engine_config()
+    assert "demo_mode" in cfg
+    assert "roles" in cfg
+    # Never leak passwords or sensitive secret hashes in public config
+    cfg_str = str(cfg).lower()
+    assert "password" not in cfg_str
+    assert "secret_key" not in cfg_str
+
+
+# ---------------------------------------------------------------------------
+# SPRINT 2 EMERGENCY SOS & ESCALATION TESTS (Tests 86-98)
+# ---------------------------------------------------------------------------
+
+def test_86_phone_encryption_and_masking():
+    """Sprint 2: Worker phone numbers are encrypted with AES-256 Fernet and masked in non-worker payloads."""
+    raw_phone = "+1-555-019-2834"
+    enc = encrypt_phone(raw_phone)
+    assert enc != raw_phone
+    assert len(enc) > 20
+    dec = decrypt_phone(enc)
+    assert dec == raw_phone
+
+    # Masking retains only last 4 digits
+    masked = mask_phone(raw_phone)
+    assert masked == "+1 (***) ***-2834"
+    assert "019" not in masked
+    assert "2834" in masked
+
+
+def test_87_worker_payload_phone_masking():
+    """Sprint 2: list_workers and get_worker_profile mask phone numbers for supervisors, but expose to the worker themselves."""
+    worker_u = get_user_session("worker1", "password123")
+    sup_u = get_user_session("supervisor", "password123")
+
+    # Worker views themselves -> full unmasked phone
+    w_self = get_worker_profile("w-01", current_user=worker_u)
+    assert w_self["phone"] == "+1-555-019-2834"
+    assert "phone_encrypted" not in w_self
+
+    # Supervisor views worker -> masked phone
+    w_sup = get_worker_profile("w-01", current_user=sup_u)
+    assert w_sup["phone"] == "+1 (***) ***-2834"
+    assert "phone_encrypted" not in w_sup
+
+    # Supervisor lists workers -> all phones masked
+    all_workers = list_workers(current_user=sup_u)
+    for w in all_workers:
+        assert "***" in w["phone"]
+        assert "phone_encrypted" not in w
+
+
+def test_88_consent_phone_collection():
+    """Sprint 2: Worker phone number is collected at consent and encrypted at rest."""
+    worker_u = get_user_session("worker1", "password123")
+    res = submit_consent(ConsentRequest(worker_id="w-01", consent_given=True, phone="+1-555-999-1234"), current_user=worker_u)
+    assert res["status"] == "success"
+    assert res["phone_collected"] is True
+
+    # Verify encrypted in db
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute("SELECT phone_encrypted FROM users WHERE id = ?", (worker_u["id"],))
+    enc_db = cursor.fetchone()[0]
+    conn.close()
+    assert enc_db is not None
+    assert decrypt_phone(enc_db) == "+1-555-999-1234"
+
+
+@pytest.mark.asyncio
+async def test_89_sos_simulate_mode_no_network_calls_and_dispatch_log():
+    """Sprint 2: SOS_MODE=simulate makes NO network calls and logs 'simulated' across all channels."""
+    worker_u = get_user_session("worker1", "password123")
+    res = await trigger_sos(SOSTriggerRequest(
+        worker_id="w-01",
+        symptoms=["severe dizziness", "cannot continue"],
+        latitude=40.7128,
+        longitude=-74.0060,
+        lang="en"
+    ), current_user=worker_u)
+
+    assert res["status"] == "triggered"
+    event = res["event"]
+    assert event["status"] == "active"
+    assert event["escalation_level"] == 1
+
+    # Allow asyncio loop to execute initial dispatch task
+    await asyncio.sleep(0.05)
+
+    # Check dispatch logs
+    logs = get_sos_dispatch_logs(event_id=event["id"])
+    channels = {l["channel"] for l in logs}
+    assert "websocket" in channels
+    assert "push" in channels
+    assert "sms" in channels
+    assert "voice" in channels
+
+    for l in logs:
+        assert l["status"] == "simulated"
+        assert l["mode"] == "simulate"
+
+    # Stop background task
+    stop_escalation(event["id"])
+
+
+def test_90_sos_multilingual_messages_never_diagnose():
+    """Sprint 2: Voice and SMS text in EN/HI/GU includes worker, site, zone, and 'possible heat-related emergency'. Never diagnoses."""
+    sample_event = {
+        "id": "SOS-TEST-01",
+        "worker_name": "Carlos Mendez",
+        "site_name": "Delta Casting",
+        "zone_name": "Pouring Floor",
+        "worker_lang": "en"
+    }
+
+    # EN
+    en_sms = format_message("sms", "en", sample_event)
+    assert "Carlos Mendez" in en_sms
+    assert "Delta Casting" in en_sms
+    assert "possible heat-related emergency" in en_sms
+    assert "heat stroke" not in en_sms.lower()
+
+    # HI
+    hi_sms = format_message("sms", "hi", sample_event)
+    assert "Carlos Mendez" in hi_sms
+    assert "संभावित गर्मी से संबंधित आपात स्थिति" in hi_sms
+
+    # GU
+    gu_sms = format_message("sms", "gu", sample_event)
+    assert "Carlos Mendez" in gu_sms
+    assert "સંભવિત ગરમી સંબંધિત કટોકટી" in gu_sms
+
+
+@pytest.mark.asyncio
+async def test_91_sos_rate_limiting():
+    """Sprint 2: Max 3 SOS per worker per 10 minutes with a visible message."""
+    worker_u = get_user_session("worker1", "password123")
+
+    # Clear previous SOS events for w-02
+    conn = get_db()
+    conn.cursor().execute("DELETE FROM sos_events WHERE worker_id = 'w-02'")
+    conn.commit()
+    conn.close()
+
+    # 1st, 2nd, 3rd triggers succeed
+    for i in range(3):
+        r = await trigger_sos(SOSTriggerRequest(worker_id="w-02", symptoms=["confusion"]), current_user=worker_u)
+        stop_escalation(r["event"]["id"])
+
+    # 4th trigger must fail with 429 Too Many Requests
+    with pytest.raises(HTTPException) as exc:
+        await trigger_sos(SOSTriggerRequest(worker_id="w-02", symptoms=["confusion"]), current_user=worker_u)
+    assert exc.value.status_code == 429
+    assert "Rate limit reached: Maximum 3 SOS triggers per worker per 10 minutes" in exc.value.detail
+
+
+@pytest.mark.asyncio
+async def test_92_sos_cancellation_logged_as_false_trigger():
+    """Sprint 2: Cancelled SOS is logged as false-trigger."""
+    worker_u = get_user_session("worker1", "password123")
+    res = await trigger_sos(SOSTriggerRequest(worker_id="w-03", symptoms=["dizziness"]), current_user=worker_u)
+    event_id = res["event"]["id"]
+
+    cancel_res = await cancel_sos(event_id, SOSCancelRequest(reason="Accidental press on pocket"), current_user=worker_u)
+    assert cancel_res["status"] == "cancelled"
+    assert cancel_res["event"]["is_false_trigger"] == 1
+    assert cancel_res["event"]["cancel_reason"] == "Accidental press on pocket"
+
+    # Verify audit log
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute("SELECT action, details FROM audit_log WHERE resource = ? AND action = 'SOS_CANCELLED_FALSE_TRIGGER'", (event_id,))
+    row = cursor.fetchone()
+    conn.close()
+    assert row is not None
+    assert "logged as false-trigger" in row["details"]
+
+
+@pytest.mark.asyncio
+async def test_93_sos_acknowledgment_stops_escalation():
+    """Sprint 2: Acknowledgment by supervisor/officer tap stops escalation."""
+    worker_u = get_user_session("worker1", "password123")
+    sup_u = get_user_session("supervisor", "password123")
+
+    res = await trigger_sos(SOSTriggerRequest(worker_id="w-04", symptoms=["collapsed"]), current_user=worker_u)
+    event_id = res["event"]["id"]
+
+    ack_res = await acknowledge_sos(event_id, current_user=sup_u)
+    assert ack_res["status"] == "acknowledged"
+    assert ack_res["event"]["status"] == "acknowledged"
+    assert ack_res["event"]["acknowledged_by"] == sup_u["full_name"]
+
+
+@pytest.mark.asyncio
+async def test_94_sos_escalation_chain_and_timers():
+    """Sprint 2: Escalation chain: supervisor at once (T+0), safety officer (T+60s), site medical (T+120s)."""
+    event = create_sos_event(worker_id="w-05", symptoms=["seizure"], lang="en")
+    event_id = event["id"]
+
+    # Run escalation loop with rapid micro-delays for testing
+    await _run_escalation_loop(event_id, stage2_delay=0.01, stage3_delay=0.01)
+
+    ev_final = get_sos_by_id(event_id)
+    assert ev_final["escalation_level"] == 3
+
+    logs = get_sos_dispatch_logs(event_id=event_id)
+    roles_notified = {l["recipient_role"] for l in logs}
+    assert "safety_officer" in roles_notified
+    assert "medical" in roles_notified
+
+
+def test_95_live_mode_refuses_without_credentials():
+    """Sprint 2: SOS_MODE=live refuses to start or dispatch if Twilio keys are missing."""
+    old_mode = os.environ.get("SOS_MODE")
+    old_sid = os.environ.get("TWILIO_ACCOUNT_SID")
+    try:
+        os.environ["SOS_MODE"] = "live"
+        os.environ.pop("TWILIO_ACCOUNT_SID", None)
+        os.environ.pop("TWILIO_AUTH_TOKEN", None)
+        os.environ.pop("TWILIO_FROM", None)
+
+        with pytest.raises(RuntimeError) as exc:
+            validate_live_credentials()
+        assert "requires TWILIO_ACCOUNT_SID" in str(exc.value)
+    finally:
+        if old_mode:
+            os.environ["SOS_MODE"] = old_mode
+        else:
+            os.environ.pop("SOS_MODE", None)
+        if old_sid:
+            os.environ["TWILIO_ACCOUNT_SID"] = old_sid
+
+
+def test_96_supervisor_call_worker_direct():
+    """Sprint 2: Supervisor 'Call worker now' button initiates voice call and logs audit."""
+    sup_u = get_user_session("supervisor", "password123")
+    res = call_worker_direct("w-01", current_user=sup_u)
+    assert res["status"] == "call_initiated"
+    assert "***" in res["masked_phone"]
+    assert res["masked_phone"].startswith("+1 (***) ***-")
+
+    # Verify voice call logged in dispatch log
+    logs = get_sos_dispatch_logs(event_id="CALL-w-01")
+    assert len(logs) > 0
+    assert logs[0]["channel"] == "voice"
+
+
+def test_97_twilio_webhooks():
+    """Sprint 2: Twilio voice TwiML webhook and check-in webhook generation."""
+    # 1. Voice TwiML
+    twiml_resp = twilio_voice_webhook(event_id="SOS-001", lang="en")
+    assert twiml_resp.status_code == 200
+    xml_content = twiml_resp.body.decode("utf-8")
+    assert "<Gather" in xml_content
+    assert "Press 1 on your phone keypad" in xml_content
+
+    # 2. Check-in TwiML
+    checkin_resp = twilio_checkin_webhook(worker_id="w-01", lang="en")
+    assert checkin_resp.status_code == 200
+    xml_checkin = checkin_resp.body.decode("utf-8")
+    assert "Press 1 if you are fine" in xml_checkin
+    assert "Press 2 if you need" in xml_checkin
+
+
+def test_98_web_push_subscription():
+    """Sprint 2: Web Push subscription storage."""
+    worker_u = get_user_session("worker1", "password123")
+    res = subscribe_push(PushSubscriptionRequest(
+        endpoint="https://fcm.googleapis.com/fcm/send/fake-endpoint-token-1234",
+        keys={"p256dh": "key-p256dh-abc", "auth": "key-auth-xyz"}
+    ), current_user=worker_u)
+    assert res["status"] == "success"
+
+    subs = get_push_subscriptions()
+    endpoints = [s["endpoint"] for s in subs]
+    assert "https://fcm.googleapis.com/fcm/send/fake-endpoint-token-1234" in endpoints
+
+
 
 

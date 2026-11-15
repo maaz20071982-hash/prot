@@ -8,18 +8,20 @@ import {
   CheckCircle2,
   AlertCircle,
   Flame,
-  ArrowRight
+  ArrowRight,
+  ShieldAlert,
+  Loader2
 } from 'lucide-react';
-import { useAuth } from './AuthContext';
+import { useAuth, DEMO_ACCOUNTS } from './AuthContext';
 import { Card, Button, Input, Select } from './ui';
 
 export function Auth({ onLoginSuccess }) {
-  const { login, registerUser, requestPasswordReset, executePasswordReset, submitConsent, user } = useAuth();
+  const { login, registerUser, requestPasswordReset, executePasswordReset, submitConsent, user, demoMode } = useAuth();
   const [mode, setMode] = useState('login'); // 'login', 'register', 'forgot', 'reset', 'consent'
 
   // Login form
-  const [loginUser, setLoginUser] = useState('supervisor');
-  const [loginPass, setLoginPass] = useState('password123');
+  const [loginUser, setLoginUser] = useState(demoMode ? 'supervisor' : '');
+  const [loginPass, setLoginPass] = useState(demoMode ? 'password123' : '');
 
   // Register form
   const [regName, setRegName] = useState('');
@@ -29,7 +31,7 @@ export function Auth({ onLoginSuccess }) {
   const [regRole, setRegRole] = useState('worker');
 
   // Forgot / Reset
-  const [forgotTarget, setForgotTarget] = useState('supervisor');
+  const [forgotTarget, setForgotTarget] = useState(demoMode ? 'supervisor' : '');
   const [generatedResetToken, setGeneratedResetToken] = useState('');
   const [resetTokenInput, setResetTokenInput] = useState('');
   const [newPasswordInput, setNewPasswordInput] = useState('');
@@ -42,18 +44,35 @@ export function Auth({ onLoginSuccess }) {
   const [errorMsg, setErrorMsg] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
 
-  const handleQuickLogin = (uname, pwd = "password123") => {
+  const handleTryAs = async (uname, pwd) => {
     setLoginUser(uname);
     setLoginPass(pwd);
     setErrorMsg('');
+    setLoading(true);
+    try {
+      const loggedUser = await login(uname, pwd);
+      if (loggedUser.role === 'worker' && !loggedUser.consent_given) {
+        setMode('consent');
+      } else if (onLoginSuccess) {
+        onLoginSuccess(loggedUser);
+      }
+    } catch (err) {
+      setErrorMsg(err.message || "Sign in failed.");
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleLoginSubmit = async (e) => {
     e.preventDefault();
+    if (!loginUser.trim() || !loginPass) {
+      setErrorMsg("Please enter your username/email and password.");
+      return;
+    }
     setLoading(true);
     setErrorMsg('');
     try {
-      const loggedUser = await login(loginUser, loginPass);
+      const loggedUser = await login(loginUser.trim(), loginPass);
       if (loggedUser.role === 'worker' && !loggedUser.consent_given) {
         setMode('consent');
       } else if (onLoginSuccess) {
@@ -68,18 +87,22 @@ export function Auth({ onLoginSuccess }) {
 
   const handleRegisterSubmit = async (e) => {
     e.preventDefault();
+    if (regPass.length < 6) {
+      setErrorMsg("Password must be at least 6 characters.");
+      return;
+    }
     setLoading(true);
     setErrorMsg('');
     try {
       await registerUser({
-        username: regUser,
-        email: regEmail,
+        username: regUser.trim(),
+        email: regEmail.trim(),
         password: regPass,
-        full_name: regName,
+        full_name: regName.trim(),
         role: regRole,
       });
-      setSuccessMsg(`Registration successful! You may now sign in as ${regUser}.`);
-      setLoginUser(regUser);
+      setSuccessMsg(`Account created! You may now sign in as ${regUser}.`);
+      setLoginUser(regUser.trim());
       setLoginPass(regPass);
       setMode('login');
     } catch (err) {
@@ -91,14 +114,18 @@ export function Auth({ onLoginSuccess }) {
 
   const handleForgotSubmit = async (e) => {
     e.preventDefault();
+    if (!forgotTarget.trim()) {
+      setErrorMsg("Please enter the username or email to reset.");
+      return;
+    }
     setLoading(true);
     setErrorMsg('');
     try {
-      const res = await requestPasswordReset(forgotTarget);
+      const res = await requestPasswordReset(forgotTarget.trim());
       if (res.in_app_reset_token) {
         setGeneratedResetToken(res.in_app_reset_token);
         setResetTokenInput(res.in_app_reset_token);
-        setSuccessMsg("In-app reset token generated successfully. Proceed to reset password.");
+        setSuccessMsg("In-app reset token generated successfully. Enter your new password below.");
       } else {
         setSuccessMsg(res.message);
       }
@@ -111,11 +138,15 @@ export function Auth({ onLoginSuccess }) {
 
   const handleResetSubmit = async (e) => {
     e.preventDefault();
+    if (newPasswordInput.length < 6) {
+      setErrorMsg("New password must be at least 6 characters.");
+      return;
+    }
     setLoading(true);
     setErrorMsg('');
     try {
-      await executePasswordReset(resetTokenInput, newPasswordInput);
-      setSuccessMsg("Password successfully reset! Please log in with your new password.");
+      await executePasswordReset(resetTokenInput.trim(), newPasswordInput);
+      setSuccessMsg("Password successfully reset! Please sign in with your new password.");
       setLoginPass(newPasswordInput);
       setMode('login');
     } catch (err) {
@@ -135,7 +166,7 @@ export function Auth({ onLoginSuccess }) {
     setErrorMsg('');
     try {
       await submitConsent(true);
-      setSuccessMsg("Consent verified. Entering workplace dashboard.");
+      setSuccessMsg("Consent recorded. Entering platform.");
       if (onLoginSuccess) onLoginSuccess(user);
     } catch (err) {
       setErrorMsg(err.message || "Consent submission failed.");
@@ -145,32 +176,32 @@ export function Auth({ onLoginSuccess }) {
   };
 
   return (
-    <div className="max-w-md mx-auto my-8 space-y-4">
-      {/* Brand Badge */}
+    <div className="max-w-xl mx-auto my-6 space-y-4">
+      {/* Brand Header */}
       <div className="text-center space-y-1">
         <div className="inline-flex items-center justify-center w-12 h-12 rounded-xl bg-gradient-to-tr from-orange-600 to-amber-500 text-white shadow-lg shadow-orange-950/50 mb-2">
           <Flame className="w-7 h-7" />
         </div>
         <h2 className="text-xl font-black tracking-wider text-white">THERMOSENSE</h2>
-        <p className="text-xs text-slate-400">Occupational Heat-Safety Authentication & Security Gateway</p>
+        <p className="text-xs text-slate-400">Occupational Heat-Safety Authentication & Control Gateway</p>
       </div>
 
       {/* Messages */}
       {successMsg && (
-        <div className="p-3 bg-emerald-950/80 border border-emerald-500/60 rounded-lg text-xs text-emerald-200 flex items-center gap-2">
+        <div className="p-3 bg-emerald-950/80 border border-emerald-500/60 rounded-lg text-xs text-emerald-200 flex items-center gap-2" role="status">
           <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
           <span>{successMsg}</span>
         </div>
       )}
       {errorMsg && (
-        <div className="p-3 bg-red-950/80 border border-red-500/60 rounded-lg text-xs text-red-200 flex items-center gap-2">
+        <div className="p-3 bg-red-950/80 border border-red-500/60 rounded-lg text-xs text-red-200 flex items-center gap-2" role="alert">
           <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
           <span>{errorMsg}</span>
         </div>
       )}
 
-      {/* Auth Card with Tabs */}
-      <Card className="bg-industrial-900 border-industrial-700">
+      {/* Auth Card */}
+      <Card className="bg-industrial-900 border-industrial-700/80 shadow-xl">
         {mode !== 'consent' && (
           <div className="flex border-b border-industrial-800 pb-3 mb-4 text-xs font-semibold">
             <button
@@ -205,66 +236,73 @@ export function Auth({ onLoginSuccess }) {
 
         {/* 1. LOGIN FORM */}
         {mode === 'login' && (
-          <form onSubmit={handleLoginSubmit} className="space-y-3">
-            <Input
-              label="Username or Email"
-              value={loginUser}
-              onChange={(e) => setLoginUser(e.target.value)}
-              placeholder="e.g. supervisor or worker1"
-              required
-            />
+          <div className="space-y-4">
+            <form onSubmit={handleLoginSubmit} className="space-y-3">
+              <Input
+                label="Username or Email"
+                value={loginUser}
+                onChange={(e) => setLoginUser(e.target.value)}
+                placeholder="e.g. supervisor or worker1"
+                required
+              />
 
-            <Input
-              label="Password"
-              type="password"
-              value={loginPass}
-              onChange={(e) => setLoginPass(e.target.value)}
-              placeholder="••••••••"
-              required
-            />
+              <Input
+                label="Password"
+                type="password"
+                value={loginPass}
+                onChange={(e) => setLoginPass(e.target.value)}
+                placeholder="••••••••"
+                required
+              />
 
-            <Button type="submit" variant="primary" size="md" className="w-full justify-center" disabled={loading}>
-              <Lock className="w-4 h-4" />
-              <span>{loading ? "Signing in..." : "Sign In to Platform"}</span>
-            </Button>
+              <Button
+                type="submit"
+                variant="primary"
+                size="md"
+                className="w-full justify-center"
+                disabled={loading}
+              >
+                {loading ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin shrink-0" />
+                    <span>Signing in...</span>
+                  </>
+                ) : (
+                  <>
+                    <Lock className="w-4 h-4 shrink-0" />
+                    <span>Sign In to Platform</span>
+                  </>
+                )}
+              </Button>
+            </form>
 
-            {/* Quick Demo 4-Role Buttons */}
-            <div className="pt-3 border-t border-industrial-800 text-xs">
-              <span className="text-[11px] text-slate-400 font-semibold block mb-2">
-                1-Click Role Logins (Demo):
-              </span>
-              <div className="grid grid-cols-2 gap-2 text-center text-[11px]">
-                <button
-                  type="button"
-                  onClick={() => handleQuickLogin("worker1", "password123")}
-                  className="p-1.5 rounded bg-industrial-950 border border-industrial-700 hover:border-sky-500 text-slate-200"
-                >
-                  👷 Worker (Alex Morgan)
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleQuickLogin("supervisor", "password123")}
-                  className="p-1.5 rounded bg-industrial-950 border border-industrial-700 hover:border-sky-500 text-slate-200"
-                >
-                  📋 Supervisor (Marcus Vance)
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleQuickLogin("safety_officer", "password123")}
-                  className="p-1.5 rounded bg-industrial-950 border border-industrial-700 hover:border-sky-500 text-slate-200"
-                >
-                  🩺 Medic (Dr. Elena Rostova)
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleQuickLogin("admin", "admin123")}
-                  className="p-1.5 rounded bg-industrial-950 border border-industrial-700 hover:border-sky-500 text-slate-200"
-                >
-                  🛡️ Admin (Arthur Pendelton)
-                </button>
+            {/* DEMO_MODE: Try as 4 role cards */}
+            {demoMode && (
+              <div className="pt-4 border-t border-industrial-800 space-y-2">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="font-semibold text-slate-300">Try as (Demo Mode Accounts):</span>
+                  <span className="text-[10px] text-amber-400 font-mono">1-Click Sign In</span>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                  {DEMO_ACCOUNTS.map((acc) => (
+                    <button
+                      key={acc.username}
+                      type="button"
+                      onClick={() => handleTryAs(acc.username, acc.username === 'admin' ? 'admin123' : 'password123')}
+                      disabled={loading}
+                      className="p-2.5 rounded-lg bg-industrial-950/80 border border-industrial-800 hover:border-sky-500/70 text-left transition-all group flex flex-col justify-between"
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="font-bold text-slate-200 group-hover:text-sky-300 text-xs">{acc.label}</span>
+                        <span className="text-[10px] uppercase font-mono px-1 rounded bg-industrial-900 text-slate-400">{acc.role}</span>
+                      </div>
+                      <span className="text-[11px] text-slate-400 mt-1">{acc.desc}</span>
+                    </button>
+                  ))}
+                </div>
               </div>
-            </div>
-          </form>
+            )}
+          </div>
         )}
 
         {/* 2. REGISTER FORM */}
@@ -305,23 +343,22 @@ export function Auth({ onLoginSuccess }) {
               value={regRole}
               onChange={(e) => setRegRole(e.target.value)}
               options={[
-                { value: "worker", label: "Worker (Field Labor)" },
-                { value: "supervisor", label: "Supervisor (Shift Operations)" },
+                { value: "worker", label: "Worker (Field Operations)" },
+                { value: "supervisor", label: "Supervisor (Shift Management)" },
                 { value: "safety_officer", label: "Safety Officer / Site Medic" },
-                { value: "admin", label: "Administrator (EHS Director)" },
+                { value: "admin", label: "Administrator (Platform EHS Lead)" },
               ]}
             />
             <Button type="submit" variant="primary" size="md" className="w-full justify-center" disabled={loading}>
-              <User className="w-4 h-4" />
+              <User className="w-4 h-4 shrink-0" />
               <span>{loading ? "Registering..." : "Create Account"}</span>
             </Button>
           </form>
         )}
 
-        {/* 3. FORGOT / RESET FORM WITH IN-APP TOKEN */}
+        {/* 3. FORGOT / RESET FORM */}
         {(mode === 'forgot' || mode === 'reset') && (
           <div className="space-y-4">
-            {/* Step A: Request Token */}
             <form onSubmit={handleForgotSubmit} className="space-y-3">
               <Input
                 label="Username or Email to Reset"
@@ -331,12 +368,11 @@ export function Auth({ onLoginSuccess }) {
                 required
               />
               <Button type="submit" variant="secondary" size="sm" className="w-full justify-center" disabled={loading}>
-                <KeyRound className="w-3.5 h-3.5" />
+                <KeyRound className="w-3.5 h-3.5 shrink-0" />
                 <span>Generate In-App Reset Token</span>
               </Button>
             </form>
 
-            {/* Step B: Display in-app token if generated */}
             {generatedResetToken && (
               <div className="p-3 bg-industrial-950 border border-sky-500/50 rounded-lg text-xs space-y-2">
                 <div className="flex items-center justify-between text-sky-400 font-semibold">
@@ -355,7 +391,6 @@ export function Auth({ onLoginSuccess }) {
               </div>
             )}
 
-            {/* Step C: Enter New Password */}
             <form onSubmit={handleResetSubmit} className="space-y-3 pt-2 border-t border-industrial-800">
               <Input
                 label="In-App Reset Token"
@@ -365,7 +400,7 @@ export function Auth({ onLoginSuccess }) {
                 required
               />
               <Input
-                label="New Password"
+                label="New Password (min 6 chars)"
                 type="password"
                 value={newPasswordInput}
                 onChange={(e) => setNewPasswordInput(e.target.value)}
@@ -373,7 +408,7 @@ export function Auth({ onLoginSuccess }) {
                 required
               />
               <Button type="submit" variant="primary" size="md" className="w-full justify-center" disabled={loading || !resetTokenInput}>
-                <Lock className="w-4 h-4" />
+                <Lock className="w-4 h-4 shrink-0" />
                 <span>Reset Password & Update</span>
               </Button>
             </form>
@@ -385,7 +420,7 @@ export function Auth({ onLoginSuccess }) {
           <form onSubmit={handleConsentSubmit} className="space-y-4">
             <div className="p-3 bg-industrial-950 border border-sky-500/40 rounded-lg space-y-2 text-xs text-slate-300 leading-relaxed">
               <h4 className="font-bold text-white flex items-center gap-1.5">
-                <ShieldCheck className="w-4 h-4 text-emerald-400" />
+                <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
                 <span>Worker Heat-Safety Data Consent (Rule 9)</span>
               </h4>
               <p>
@@ -412,7 +447,7 @@ export function Auth({ onLoginSuccess }) {
 
             <Button type="submit" variant="primary" size="md" className="w-full justify-center" disabled={loading || !consentCheck}>
               <span>Accept & Enter Platform</span>
-              <ArrowRight className="w-4 h-4" />
+              <ArrowRight className="w-4 h-4 shrink-0" />
             </Button>
           </form>
         )}
@@ -422,4 +457,3 @@ export function Auth({ onLoginSuccess }) {
 }
 
 export default Auth;
-

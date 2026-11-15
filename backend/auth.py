@@ -26,7 +26,29 @@ if _root not in sys.path:
 
 from backend.db import get_db
 
-JWT_SECRET = "THERMOSENSE_SUPER_SECURE_JWT_SECRET_SPRINT1_PROD"
+class Roles:
+    """One shared ROLES constant for db, token, and authorization guards."""
+    WORKER = "worker"
+    SUPERVISOR = "supervisor"
+    SAFETY_OFFICER = "safety_officer"
+    ADMIN = "admin"
+
+    ALL = [WORKER, SUPERVISOR, SAFETY_OFFICER, ADMIN]
+    MANAGEMENT = [SUPERVISOR, SAFETY_OFFICER, ADMIN]
+    SAFETY_ADMIN = [SAFETY_OFFICER, ADMIN]
+
+
+def normalize_identity(identifier: str) -> str:
+    """Normalises username or email: strips whitespace; if email, lowercases."""
+    if not identifier:
+        return ""
+    val = identifier.strip()
+    if "@" in val:
+        return val.lower()
+    return val
+
+
+JWT_SECRET = os.environ.get("JWT_SECRET", "THERMOSENSE_SUPER_SECURE_JWT_SECRET_SPRINT1_PROD")
 JWT_ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30  # Prompt requirement: 30-minute token expiry
 REFRESH_TOKEN_EXPIRE_DAYS = 7

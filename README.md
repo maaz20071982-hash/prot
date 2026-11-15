@@ -67,19 +67,53 @@ prot/
 
 ## 3. Sprint Capabilities Overview
 
-### Sprint 1: Foundational Heat-Safety Core
+### Sprint 1: Foundational Heat-Safety Core & Authentication
 - **Deterministic Thermodynamic Engine (`engine.py`)**: BoM approximation formula for WBGT estimate (proxy), personal work-rest thresholds, metabolic workload baseline adjustments, reading quality grading, and duplicate alert suppression window (10 min).
-- **Encrypted Privacy Vault (`db.py`)**: AES-256 Fernet encryption for `health_private`. Health conditions are strictly segregated and shielded from supervisors.
+- **Encrypted Privacy Vault (`db.py`)**: AES-256 Fernet encryption for `health_private` and worker phone numbers. Health conditions are strictly segregated and shielded from supervisors.
 - **Biometric Fingerprinting (`ml.py`)**: Resting HR median and spread calculation, workload heart rate bands, recovery half-time, and safe cold-start group defaults.
 - **Simulation Engine (`simulator.py`)**: 7 deterministic scenarios (`normal`, `rising_heat`, `over_exertion`, `dehydration_drift`, `noisy_sensor`, `missing_data`, `collapse`).
 - **Mobile-First Worker Dashboard (`Worker.jsx`)**: 390px optimized responsive interface displaying personal risk, proxy WBGT, rest countdown timer, hydration log, and check-in status.
+- **Vite Proxy & Authentication**: Robust session persistence, normalized email/username login, double-submit protection, and 4 seeded demo accounts.
+- **Automatic Weather Ingestion**: Open-Meteo background polling (10-minute cycle per site) with 30-minute stale expiry, fallback to last-good, and source hierarchy: Manual WBGT > Manual T/RH > External Verified > Simulated.
 
-### Sprint 2: Command Centre, Alerts, Digital Twin & Recovery
-- **Industrial Command Centre (`Command.jsx`)**: Real-time workforce grid, environmental telemetry, risk distribution chart, worker drill-down drawer, and SVG heat risk map with zone overlays.
-- **Alert Lifecycle & Auto-Escalation**: Alert priorities (Normal, Elevated, High, Emergency), in-app audio synthesized alarms with mute, auto-escalation timers (High: 5 min, Emergency: 2 min), false-alert flagging, and alert history audit trail.
-- **Rule 8 Return-to-Work Clearance**: Strict human-in-the-loop recovery workflow. Recovery indicators requiring HR within 20 bpm of baseline for 3 min, no symptoms, minimum rest elapsed, and a digitally signed clearance note by a named human supervisor.
-- **Predictive Digital Twin & What-If Simulator (`Predict.jsx`)**: Ridge regression 30-minute forward projection with backtest error bands, IsolationForest anomaly detection, and interactive What-If scenario explorer directly wired to `engine.assess()`.
-- **Shift Risk Planner**: Integrated Open-Meteo hourly weather forecasting with deterministic offline fallback.
+### Sprint 2: Emergency SOS System, Escalation Chain & UI/UX Overhaul
+- **Worker SOS Button & Full-Screen Countdown (`Worker.jsx`)**:
+  - Fixed 56px (h-14) touch target button at the bottom of every worker screen.
+  - Press-and-hold 1.5 seconds with an animated SVG circular progress ring.
+  - 5-second full-screen cancellation countdown with a large Cancel button (logs `false-trigger` with reason).
+  - Symptom quick-picker (*confusion, collapsed, seizure, severe dizziness, cannot continue*) that raises an acute Emergency alert directly.
+  - Rate limiting: strictly capped at maximum 3 SOS triggers per worker per 10 minutes with clear UI alerts.
+  - Optional geolocation sharing with explicit browser permission.
+- **Multi-Channel Dispatch Engine (`backend/notify.py`)**:
+  - `dispatch(event)` runs asynchronous escalation chain and logs all actions into `sos_dispatch_log` (`channel, recipient_role, status, timestamp, message, mode`).
+  - Channels supported: in-app WebSocket (`/ws`), Web Push notifications (`pywebpush`), SMS (`twilio`), and automated interactive voice calls (`twilio`).
+  - `SOS_MODE=simulate` (default): Zero external network calls; logs status `'simulated'`. Safe for development and CI testing.
+  - `SOS_MODE=live`: Validates all required API keys on startup and throws hard error if credentials are missing.
+- **Automatic Escalation Chain**:
+  - **T = 0s**: Immediate dispatch to on-duty Supervisor via WebSocket, Web Push, SMS, and Voice.
+  - **T = 60s**: Escalation to Site Safety Officer if unacknowledged.
+  - **T = 120s**: Escalation to Site Medical Contact if still unacknowledged.
+  - Acknowledgment via in-app button tap or pressing `1` on Twilio voice call immediately stops the chain.
+  - Multilingual voice and SMS templates (`EN`, `HI`, `GU`) containing worker name, site, zone, and explicit phrase *"possible heat-related emergency"* (strictly never diagnoses).
+- **Worker Phone Privacy & Check-in Automation**:
+  - Phone numbers collected during consent, stored with AES-256 Fernet encryption, and masked (`+1 (***) ***-1234`) in all non-worker payloads.
+  - Supervisor "Call Worker Now" button initiates an immediate direct voice call.
+  - Automated check-in call placed when a High or Emergency alert remains unanswered for 60 seconds (*"Press 1 if fine, press 2 if you need help"*). Pressing `2` or timeout automatically escalates to active SOS.
+- **Supervisor & Officer Alarm Takeover (`Command.jsx`)**:
+  - Full-screen emergency modal takeover with flashing high-visibility banner.
+  - Looping emergency siren powered by Web Audio API with one-time user activation and mute toggle.
+  - Real-time worker vitals, location, environmental readings, direct call buttons, "Acknowledge" button, and live multi-channel dispatch log panel.
+- **Worker Emergency Screen & PWA Capabilities**:
+  - Immediate first-response instructions rendered from the active site protocol.
+  - User-initiated tap-to-call `tel:` buttons for emergency services (`112`, `108`, Site Medical) — **never auto-dialed**.
+  - Service Worker (`sw.js`) with Web Push handler (`requireInteraction: true`, click-to-open emergency view).
+  - Web App Manifest (`manifest.webmanifest`) supporting standalone PWA installation on Android and iOS (with Add to Home Screen guide).
+- **Design Foundation & UI/UX Upgrade**:
+  - Shared design primitives in `ui.jsx` (RiskBadge, SourceTag, StatCard, ChartCard, EmptyState, Skeleton, Toast, Drawer, ConfirmDialog).
+  - Sticky filter bars across Command Centre, Incidents, Predict, Analytics, and Innovation.
+  - Key insight summary sentence placed above every data chart.
+  - Dark / Light theme toggle persisted in `localStorage` per user.
+  - WCAG AAA compliance, accessible high-contrast focus rings, 48px touch targets, and `prefers-reduced-motion` compliance.
 
 ### Sprint 3: Governance, Analytics & Innovation
 - **Safety & Compliance (`Safety.jsx`)**:
@@ -168,32 +202,42 @@ Dataset & Validation:
 - Python 3.11+
 - Node.js 18+ and npm
 
-### 1. Backend Setup & Seed
+### 1. Backend Setup, Environment Variables & Seed
 ```bash
-# Install backend dependencies
+# Install backend dependencies (including twilio and pywebpush)
 pip install -r requirements.txt
+
+# Configure environment variables (optional; defaults to simulate mode)
+# Copy example configuration:
+cp .env.example .env
 
 # Initialize database and seed 30-day realistic industrial dataset
 python backend/db.py
 
-# Run all 70 automated pytest tests
+# Run all 98 automated backend tests
 pytest backend/test_all.py -v
+
+# Run the end-to-end browser smoke test (Playwright)
+python backend/e2e_smoke.py
 ```
 
-### 2. Frontend Setup & Build
-```bash
-cd frontend
+### Environment Configuration & SOS Modes
 
-# Install dependencies
-npm install
+| Variable | Default | Description |
+|---|---|---|
+| `SOS_MODE` | `simulate` | Mode of operation: `simulate` (zero network calls, logs `'simulated'`) or `live` (validates API keys, sends real push/SMS/calls). |
+| `PUBLIC_BASE_URL` | `http://localhost:8000` | Publicly reachable base URL for incoming Twilio interactive voice webhooks (`/api/webhooks/twilio/voice` and `/checkin`). |
+| `TWILIO_ACCOUNT_SID` | *Empty* | Twilio Account SID (required when `SOS_MODE=live`). |
+| `TWILIO_AUTH_TOKEN` | *Empty* | Twilio Auth Token (required when `SOS_MODE=live`). |
+| `TWILIO_FROM` | *Empty* | Twilio outbound phone number in E.164 format (e.g. `+15550192834`). |
+| `VAPID_PUBLIC_KEY` | *Empty* | Application server VAPID public key for Web Push. |
+| `VAPID_PRIVATE_KEY` | *Empty* | Application server VAPID private key for Web Push. |
+| `VAPID_CLAIMS_SUB` | `mailto:safety@thermosense.local` | Contact email included in Web Push authorization headers. |
 
-# Verify production build passes cleanly
-npm run build
-
-# Start development server
-npm run dev
-```
-The application will be accessible at `http://localhost:5173`.
+### Progressive Web App (PWA) & Service Worker Setup
+- **Service Worker (`frontend/public/sw.js`)**: Handles background push events, displays persistent push notifications with `requireInteraction: true`, and navigates directly to `/worker` emergency view upon notification click.
+- **Web Manifest (`frontend/public/manifest.webmanifest`)**: Enables full-screen installation without browser chrome.
+- **iPhone / iOS Deployment**: Safari does not support automated PWA installation prompts. Users must open Safari, tap the **Share** button, and select **Add to Home Screen** to receive native push notifications and enable full-screen emergency mode.
 
 ---
 
@@ -201,22 +245,22 @@ The application will be accessible at `http://localhost:5173`.
 
 | Role | Username | Password | Full Name | Primary Responsibilities |
 |---|---|---|---|---|
-| **Worker** | `worker1` | `password123` | Alex Morgan | 390px mobile heat dashboard, hydration logging, rest timer |
-| **Supervisor** | `supervisor` | `password123` | Marcus Vance | Real-time workforce grid, alert ack, return-to-work clearance |
+| **Worker** | `worker1` | `password123` | Alex Morgan | 390px mobile heat dashboard, SOS emergency button, hydration |
+| **Supervisor** | `supervisor` | `password123` | Marcus Vance | Real-time command grid, SOS alarm takeover, call worker, RTW clearance |
 | **Safety Officer** | `safety_officer` | `password123` | Dr. Elena Rostova | Protocol configuration, OSHA compliance, health vault audits |
-| **Administrator** | `admin` | `admin123` | Arthur Pendelton | Full system governance, data retention, Innovation Lab |
+| **Administrator** | `admin` | `admin123` | Arthur Pendelton | Full system governance, data retention, user administration |
 
 ---
 
-## 8. Test Suite Summary (70 Passing Tests)
+## 8. Test Suite Summary (98 Passing Tests + E2E Playwright Suite)
 
-The test suite in `backend/test_all.py` covers all 11 Hard Rules and end-to-end operational safety paths:
+The automated test suite in `backend/test_all.py` covers all 11 Hard Rules and end-to-end operational safety paths:
 
 ```text
-============================== 70 passed in 2.59s ==============================
+============================== 98 passed in 3.96s ==============================
 ```
 
-- **Tests 1–40 (Sprint 1 Core)**:
+- **Tests 1–40 (Sprint 1 Core Thermodynamic Engine & Safety)**:
   - Database schema integrity, AES-256 Fernet health encryption.
   - Pure deterministic thermodynamic equations (`wbgt_proxy`, `personal_limit`, `accumulated_exposure`).
   - Reading quality scoring and 10-minute alert duplicate suppression.
@@ -240,10 +284,47 @@ The test suite in `backend/test_all.py` covers all 11 Hard Rules and end-to-end 
   - Personalised Nudges: 30-minute rate limiting and critical bypass (`test_68`).
   - 60-Shift Synthetic Benchmark: model card and label verification (`test_69`).
   - Judge Walkthrough: end-to-end 8-step smoke test with fixed seed 42 (`test_70`).
+- **Tests 71–85 (Sprint 1 Modernization & Production Readiness)**:
+  - Bcrypt password hash normalization and verification.
+  - API proxy, CORS configuration, and JWT environment stability across restarts.
+  - Organization and site latitude/longitude CRUD operations.
+  - Open-Meteo external weather fetching, 30-minute stale expiry, and fallback hierarchy.
+- **Tests 86–98 (Sprint 2 Emergency SOS & Escalation Chain)**:
+  - Worker phone AES-256 encryption at rest and role-based masking (`test_86`, `test_87`).
+  - Consent-based phone updates and payload shielding (`test_88`).
+  - `SOS_MODE=simulate` zero network call guarantees and multi-channel dispatch logging (`test_89`).
+  - Multilingual notification copy verification (`EN`, `HI`, `GU`) adhering to the "never diagnose" rule (`test_90`).
+  - SOS rate limiting (strictly max 3 per 10 minutes) (`test_91`).
+  - Cancelled countdown logging as `false-trigger` with reason (`test_92`).
+  - Acknowledgment stopping the escalation chain (`test_93`).
+  - Automated 3-stage escalation timing: Supervisor (0s) -> Safety Officer (60s) -> Site Medical (120s) (`test_94`).
+  - `SOS_MODE=live` startup credential validation and hard refusal on missing keys (`test_95`).
+  - Supervisor direct voice call trigger (`test_96`).
+  - Twilio DTMF voice webhook handling (Key 1 acknowledgment, Key 2 check-in escalation) (`test_97`).
+  - Push subscription endpoint and notification storage (`test_98`).
+- **Playwright End-to-End Suite (`backend/e2e_smoke.py`)**:
+  - Full headless browser verification across all 4 seeded roles (`worker1`, `supervisor`, `safety_officer`, `admin`).
+  - Live Emergency SOS simulation: triggers 1.5s hold, full-screen countdown, emergency screen rendering, and "I Am Safe" resolution.
 
 ---
 
 ## 9. Honest Operational Limitations & Boundary Conditions
+
+### Emergency SOS & Telecom Limitations
+1. **Cellular and Telephony Latency:** While WebSocket alerts broadcast instantaneously (<50ms), SMS and PSTN automated voice calls rely on cellular carrier networks and may incur a 3–15 second transit delay. Critical on-site emergency workflows must always treat the local in-app siren as the primary alarm.
+2. **User-Initiated Emergency Calling Only:** In accordance with telecommunications regulations and safety guidelines, the platform provides direct tap-to-call `tel:` buttons for public emergency dispatch (`112`, `108`, Site Medic) but **NEVER automatically dials public 911/112/108 services**. Dialing must be initiated by human action.
+3. **PWA Background Execution:** Web browsers on mobile operating systems (especially iOS WebKit) suspend background JavaScript execution when the device is locked. Critical push notifications require user interaction (`requireInteraction: true`) to reopen the application into emergency mode.
+4. **Geolocation Accuracy:** Worker location sharing uses browser HTML5 Geolocation API and is contingent on explicit user permission. In deep indoor or shielded industrial facilities, GPS accuracy may degrade to cellular tower triangulation (~100–500m).
+
+### Environmental & Physical Telemetry Limitations
+1. **Proxy WBGT vs. Calibrated Wet Bulb Globe:** When using ambient dry-bulb temperature and relative humidity, the system calculates a proxy estimate using the Australian Bureau of Meteorology (BoM) formula. While calibrated for typical outdoor solar radiation, it cannot measure localized radiant heat from blast furnaces, hot metal ladles, or unshielded steam piping without a manual instrument reading.
+2. **Missing Airflow Telemetry:** The platform does not currently incorporate anemometer wind speed readings into the proxy formula. Stagnant enclosed spaces (e.g., vessel interiors) may experience substantially higher heat strain than calculated.
+3. **Clothing Adjustment Factors (CAF):** Default CAF adjustments follow ACGIH standard additions (+0 to +3°C). Specialized vapor-impermeable chemical or Level A hazmat suits require manual custom protocol overrides.
+
+### Physiological & Algorithmic Limitations
+1. **Decision Support, Not Clinical Diagnostic:** THERMOSENSE is not a diagnostic device. It estimates physiological strain based on population models, baseline heart rate spread, and declared acclimatization. Individual responses vary significantly based on sleep, medications, caffeine, and recent viral illnesses.
+2. **Cold-Start Phase:** For workers with fewer than 3 completed shifts, the system relies on conservative population defaults. Highly trained or conversely highly vulnerable individuals may experience slightly higher alert frequency during cold-start.
+3. **ML Anomaly Detection Scope:** Machine learning models detect statistical deviation from a worker's personal baseline; they do not assess medical etiology. By code invariant, ML notices are bounded and never trigger acute emergency workflows independently.
 
 ### Environmental & Physical Telemetry Limitations
 1. **Proxy WBGT vs. Calibrated Wet Bulb Globe:** When using ambient dry-bulb temperature and relative humidity, the system calculates a proxy estimate using the Australian Bureau of Meteorology (BoM) formula. While calibrated for typical outdoor solar radiation, it cannot measure localized radiant heat from blast furnaces, hot metal ladles, or unshielded steam piping without a manual instrument reading.

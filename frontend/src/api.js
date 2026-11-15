@@ -3,8 +3,8 @@
  * Wraps backend endpoints with token injection and error handling.
  */
 
-const BASE_URL = (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_API_BASE_URL) 
-  ? import.meta.env.VITE_API_BASE_URL 
+const BASE_URL = (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_API_BASE_URL)
+  ? import.meta.env.VITE_API_BASE_URL
   : '/api';
 
 function getAuthHeader() {
@@ -12,32 +12,93 @@ function getAuthHeader() {
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
-async function request(endpoint, options = {}) {
+let isRefreshing = false;
+let refreshSubscribers = [];
+
+function onRefreshed(newToken) {
+  refreshSubscribers.forEach((callback) => callback(newToken));
+  refreshSubscribers = [];
+}
+
+async function request(endpoint, options = {}, isRetry = false) {
   const headers = {
     'Content-Type': 'application/json',
     ...getAuthHeader(),
     ...options.headers,
   };
 
-  const res = await fetch(`${BASE_URL}${endpoint}`, {
-    ...options,
-    headers,
-  });
+  try {
+    const res = await fetch(`${BASE_URL}${endpoint}`, {
+      ...options,
+      headers,
+    });
 
-  if (!res.ok) {
-    let errorDetail = `Request failed: ${res.status}`;
-    try {
-      const errJson = await res.json();
-      errorDetail = errJson.detail || errorDetail;
-    } catch (e) {
-      // fallback
+    // 401 Interception: Attempt silent refresh once using stored refresh token
+    if (res.status === 401 && !isRetry && !endpoint.includes('/auth/login') && !endpoint.includes('/auth/refresh')) {
+      const refreshToken = localStorage.getItem('thermosense_refresh_token');
+      if (refreshToken) {
+        if (!isRefreshing) {
+          isRefreshing = true;
+          try {
+            const refreshRes = await fetch(`${BASE_URL}/auth/refresh`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ refresh_token: refreshToken }),
+            });
+            if (refreshRes.ok) {
+              const data = await refreshRes.json();
+              localStorage.setItem('thermosense_token', data.access_token);
+              isRefreshing = false;
+              onRefreshed(data.access_token);
+              return request(endpoint, options, true);
+            } else {
+              isRefreshing = false;
+              localStorage.removeItem('thermosense_token');
+              localStorage.removeItem('thermosense_refresh_token');
+              window.dispatchEvent(new Event('thermosense_auth_expired'));
+            }
+          } catch (e) {
+            isRefreshing = false;
+            localStorage.removeItem('thermosense_token');
+            localStorage.removeItem('thermosense_refresh_token');
+            window.dispatchEvent(new Event('thermosense_auth_expired'));
+          }
+        } else {
+          return new Promise((resolve, reject) => {
+            refreshSubscribers.push((newToken) => {
+              if (newToken) {
+                resolve(request(endpoint, options, true));
+              } else {
+                reject(new Error("Session expired"));
+              }
+            });
+          });
+        }
+      }
     }
-    const error = new Error(errorDetail);
-    error.status = res.status;
-    throw error;
-  }
 
-  return res.json();
+    if (!res.ok) {
+      let errorDetail = `Request failed: ${res.status}`;
+      try {
+        const errJson = await res.json();
+        errorDetail = errJson.detail || errorDetail;
+      } catch (e) {
+        // fallback
+      }
+      const error = new Error(errorDetail);
+      error.status = res.status;
+      throw error;
+    }
+
+    return res.json();
+  } catch (err) {
+    if (err.name === 'TypeError' && err.message.includes('fetch')) {
+      const netError = new Error("Unable to connect to THERMOSENSE safety engine. Server is offline or unreachable.");
+      netError.status = 503;
+      throw netError;
+    }
+    throw err;
+  }
 }
 
 export const api = {
@@ -316,4 +377,108 @@ export const api = {
     request('/walkthrough/reset', {
       method: 'POST',
     }),
+
+  // Administrator Control Plane (Sprint 1)
+  admin: {
+    getOrgs: () => request('/admin/orgs'),
+    createOrg: (data) =>
+      request('/admin/orgs', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+    getSites: () => request('/admin/sites'),
+    createSite: (data) =>
+      request('/admin/sites', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+    updateSite: (id, data) =>
+      request(`/admin/sites/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify(data),
+      }),
+    deleteSite: (id) =>
+      request(`/admin/sites/${id}`, {
+        method: 'DELETE',
+      }),
+    getUsers: (params = {}) => {
+      const q = new URLSearchParams(params).toString();
+      return request(`/admin/users${q ? `?${q}` : ''}`);
+    },
+    setUserStatus: (userId, newStatus) =>
+      request(`/admin/users/${userId}/status?new_status=${newStatus}`, {
+        method: 'POST',
+      }),
+    setUserRole: (userId, newRole) =>
+      request(`/admin/users/${userId}/role`, {
+        method: 'POST',
+        body: JSON.stringify({ new_role: newRole }),
+      }),
+    generateResetToken: (userId) =>
+      request(`/admin/users/${userId}/reset-token`, {
+        method: 'POST',
+      }),
+    purgeRetention: (days, reason) =>
+      request('/admin/retention/purge', {
+        method: 'POST',
+        body: JSON.stringify({ days_retained: days, reason }),
+      }),
+    getLoginHistory: (limit = 100) => request(`/admin/login-history?limit=${limit}`),
+    getAuditLogs: (limit = 100, action = '') => {
+      const q = action ? `&action=${encodeURIComponent(action)}` : '';
+      return request(`/admin/audit-logs?limit=${limit}${q}`);
+    },
+    getConfig: () => request('/admin/config'),
+  },
+
+  // Weather Service (Sprint 1)
+  weather: {
+    get: (siteId) => request(`/weather/${siteId}`),
+    refresh: (siteId) =>
+      request(`/weather/${siteId}/refresh`, {
+        method: 'POST',
+      }),
+    setMode: (siteId, mode) =>
+      request(`/weather/${siteId}/mode`, {
+        method: 'POST',
+        body: JSON.stringify({ mode }),
+      }),
+    submitManual: (siteId, data) =>
+      request(`/weather/${siteId}/manual`, {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+  },
+
+  // Emergency SOS & Escalation (Sprint 2)
+  sos: {
+    trigger: (data = {}) =>
+      request('/sos/trigger', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+    cancel: (eventId, reason = 'Worker indicated false trigger') =>
+      request(`/sos/${eventId}/cancel`, {
+        method: 'POST',
+        body: JSON.stringify({ reason }),
+      }),
+    acknowledge: (eventId) =>
+      request(`/sos/${eventId}/acknowledge`, {
+        method: 'POST',
+      }),
+    getActive: () => request('/sos/active'),
+    getDispatchLogs: (eventId = '', limit = 100) => {
+      const q = eventId ? `?event_id=${eventId}&limit=${limit}` : `?limit=${limit}`;
+      return request(`/sos/dispatch-log${q}`);
+    },
+    callWorker: (workerId) =>
+      request(`/workers/${workerId}/call`, {
+        method: 'POST',
+      }),
+    subscribePush: (subscription) =>
+      request('/push/subscribe', {
+        method: 'POST',
+        body: JSON.stringify(subscription),
+      }),
+  },
 };

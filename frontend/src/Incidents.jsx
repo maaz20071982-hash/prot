@@ -30,7 +30,9 @@ import {
   Select,
   Textarea,
   SeverityBadge,
-  RiskBadge
+  RiskBadge,
+  Skeleton,
+  EmptyState
 } from './ui';
 
 export function Incidents() {
@@ -241,8 +243,8 @@ export function Incidents() {
             <span className="text-[10px] text-slate-500 font-mono">Formal Case Log</span>
           </div>
 
-          {/* Search & Filters */}
-          <div className="space-y-2 text-xs">
+          {/* Search & Filters (Sticky Filter Bar) */}
+          <div className="sticky top-20 z-10 bg-industrial-900 pb-2 space-y-2 text-xs">
             <div className="relative">
               <Search className="w-3.5 h-3.5 text-slate-500 absolute left-2.5 top-2.5" />
               <input
@@ -284,32 +286,46 @@ export function Incidents() {
 
           {/* Incidents Scrollable List */}
           <div className="space-y-2 max-h-[550px] overflow-y-auto pr-1">
-            {filteredIncidents.map((inc) => {
-              const isSelected = selectedIncident?.id === inc.id;
-              return (
-                <div
-                  key={inc.id}
-                  onClick={() => handleSelectIncident(inc)}
-                  className={`p-3 rounded-lg border text-xs cursor-pointer transition ${
-                    isSelected
-                      ? 'bg-industrial-800 border-sky-500/80 shadow-md'
-                      : 'bg-industrial-950 border-industrial-800 hover:border-industrial-700'
-                  }`}
-                >
-                  <div className="flex items-center justify-between">
-                    <span className="font-mono text-[10px] text-slate-500">{inc.id}</span>
-                    <SeverityBadge severity={inc.severity} />
-                  </div>
+            {loading ? (
+              <div className="space-y-2 p-1">
+                <Skeleton className="h-16 w-full rounded-lg" />
+                <Skeleton className="h-16 w-full rounded-lg" />
+                <Skeleton className="h-16 w-full rounded-lg" />
+              </div>
+            ) : filteredIncidents.length === 0 ? (
+              <EmptyState
+                icon={FileWarning}
+                title="No Incidents Match Filter"
+                description="Try clearing search or filters to display recorded safety cases."
+              />
+            ) : (
+              filteredIncidents.map((inc) => {
+                const isSelected = selectedIncident?.id === inc.id;
+                return (
+                  <div
+                    key={inc.id}
+                    onClick={() => handleSelectIncident(inc)}
+                    className={`p-3 rounded-lg border text-xs cursor-pointer transition ${
+                      isSelected
+                        ? 'bg-industrial-800 border-sky-500/80 shadow-md'
+                        : 'bg-industrial-950 border-industrial-800 hover:border-industrial-700'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="font-mono text-[10px] text-slate-500">{inc.id}</span>
+                      <SeverityBadge severity={inc.severity} />
+                    </div>
 
-                  <h3 className="font-bold text-white text-xs mt-1 leading-snug">{inc.title}</h3>
+                    <h3 className="font-bold text-white text-xs mt-1 leading-snug">{inc.title}</h3>
 
-                  <div className="flex items-center justify-between text-[11px] text-slate-400 mt-2 pt-1.5 border-t border-industrial-900">
-                    <span className="text-slate-300 font-medium">{inc.worker_name}</span>
-                    <span className="font-mono text-[10px]">{inc.status}</span>
+                    <div className="flex items-center justify-between text-[11px] text-slate-400 mt-2 pt-1.5 border-t border-industrial-900">
+                      <span className="text-slate-300 font-medium">{inc.worker_name}</span>
+                      <span className="font-mono text-[10px]">{inc.status}</span>
+                    </div>
                   </div>
-                </div>
-              );
-            })}
+                );
+              })
+            )}
           </div>
         </div>
 

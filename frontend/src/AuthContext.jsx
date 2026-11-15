@@ -4,16 +4,34 @@ import { api } from './api';
 const AuthContext = createContext(null);
 
 export const DEMO_ACCOUNTS = [
-  { username: 'worker1', label: 'Alex Morgan (Foundry Worker)', role: 'worker' },
-  { username: 'supervisor', label: 'Marcus Vance (Supervisor)', role: 'supervisor' },
-  { username: 'safety_officer', label: 'Dr. Elena Rostova (Safety Officer)', role: 'safety_officer' },
-  { username: 'admin', label: 'Arthur Pendelton (Administrator)', role: 'admin' },
+  { username: 'worker1', label: 'Alex Morgan (Foundry Worker)', role: 'worker', desc: 'Field worker thermal safety dashboard' },
+  { username: 'supervisor', label: 'Marcus Vance (Supervisor)', role: 'supervisor', desc: 'Site command centre & shift operations' },
+  { username: 'safety_officer', label: 'Dr. Elena Rostova (Safety Officer)', role: 'safety_officer', desc: 'Predictive analytics & medical compliance' },
+  { username: 'admin', label: 'Arthur Pendelton (Administrator)', role: 'admin', desc: 'Control plane, site management & governance' },
 ];
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [token, setToken] = useState(localStorage.getItem('thermosense_token'));
+  const [demoMode, setDemoMode] = useState(true);
   const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    // Check system config for DEMO_MODE setting
+    api.getConfig().then((cfg) => {
+      if (typeof cfg.demo_mode === 'boolean') {
+        setDemoMode(cfg.demo_mode);
+      }
+    }).catch(() => { });
+
+    // Listen for auth expiration events
+    const handleExpired = () => {
+      setUser(null);
+      setToken(null);
+    };
+    window.addEventListener('thermosense_auth_expired', handleExpired);
+    return () => window.removeEventListener('thermosense_auth_expired', handleExpired);
+  }, []);
 
   useEffect(() => {
     async function loadUser() {
@@ -26,15 +44,7 @@ export function AuthProvider({ children }) {
           logout();
         }
       } else {
-        // Auto-login as worker1 for worker mobile view baseline if no token
-        try {
-          const res = await api.login('worker1', 'password123');
-          localStorage.setItem('thermosense_token', res.access_token);
-          setToken(res.access_token);
-          setUser(res.user);
-        } catch (e) {
-          // Fallback if backend offline
-        }
+        setUser(null);
       }
       setLoading(false);
     }
@@ -44,6 +54,9 @@ export function AuthProvider({ children }) {
   const login = async (username, password) => {
     const res = await api.login(username, password);
     localStorage.setItem('thermosense_token', res.access_token);
+    if (res.refresh_token) {
+      localStorage.setItem('thermosense_refresh_token', res.refresh_token);
+    }
     setToken(res.access_token);
     setUser(res.user);
     return res.user;
@@ -83,6 +96,7 @@ export function AuthProvider({ children }) {
 
   const logout = () => {
     localStorage.removeItem('thermosense_token');
+    localStorage.removeItem('thermosense_refresh_token');
     setToken(null);
     setUser(null);
   };
@@ -92,6 +106,7 @@ export function AuthProvider({ children }) {
       value={{
         user,
         token,
+        demoMode,
         login,
         registerUser,
         requestPasswordReset,

@@ -352,8 +352,8 @@ export function Innovation() {
         )}
       </div>
 
-      {/* 2. Sub-Navigation Tabs */}
-      <div className="flex flex-wrap items-center gap-2 border-b border-industrial-800 pb-2">
+      {/* 2. Sub-Navigation Tabs (Sticky Filter Bar) */}
+      <div className="sticky top-20 z-10 bg-industrial-950/95 backdrop-blur-md pt-2 pb-2 border-b border-industrial-800 flex flex-wrap items-center gap-2">
         {[
           { id: 'assistant', label: 'Multilingual Assistant (en/hi/gu)', icon: Languages },
           { id: 'passport', label: 'Heat Safety Passport', icon: FileCheck2 },

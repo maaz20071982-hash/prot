@@ -67,6 +67,36 @@ def decrypt_health(encrypted_str: str) -> Dict[str, Any]:
         return {"error": f"Decryption failure: {str(e)}"}
 
 
+def encrypt_phone(phone: str) -> str:
+    """Encrypts worker phone number at rest using AES-256 Fernet."""
+    if not phone:
+        return ""
+    return _cipher.encrypt(phone.strip().encode("utf-8")).decode("utf-8")
+
+
+def decrypt_phone(encrypted_str: str) -> str:
+    """Decrypts worker phone number for emergency voice/SMS dispatch."""
+    if not encrypted_str:
+        return ""
+    try:
+        return _cipher.decrypt(encrypted_str.encode("utf-8")).decode("utf-8")
+    except Exception:
+        return ""
+
+
+def mask_phone(phone: str) -> str:
+    """Masks phone number in non-worker payloads to protect privacy (+1 (***) ***-1234)."""
+    if not phone:
+        return "+1 (***) ***-****"
+    cleaned = phone.strip()
+    digits = [c for c in cleaned if c.isdigit()]
+    if len(digits) < 4:
+        return "+1 (***) ***-****"
+    last4 = "".join(digits[-4:])
+    return f"+1 (***) ***-{last4}"
+
+
+
 def log_audit(
     user_id: str,
     username: str,
@@ -144,10 +174,20 @@ def init_db():
             org_id TEXT NOT NULL,
             name TEXT NOT NULL,
             location TEXT NOT NULL,
+            latitude REAL DEFAULT 40.7128,
+            longitude REAL DEFAULT -74.0060,
             created_at TEXT NOT NULL,
             FOREIGN KEY (org_id) REFERENCES organizations(id)
         )
     """)
+
+    # Ensure latitude and longitude columns exist
+    cursor.execute("PRAGMA table_info(sites)")
+    existing_site_cols = [col[1] for col in cursor.fetchall()]
+    if "latitude" not in existing_site_cols:
+        cursor.execute("ALTER TABLE sites ADD COLUMN latitude REAL DEFAULT 40.7128")
+    if "longitude" not in existing_site_cols:
+        cursor.execute("ALTER TABLE sites ADD COLUMN longitude REAL DEFAULT -74.0060")
 
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS zones (
@@ -176,9 +216,15 @@ def init_db():
             reset_token TEXT,
             reset_token_exp TEXT,
             created_at TEXT NOT NULL,
+            phone_encrypted TEXT,
             FOREIGN KEY (org_id) REFERENCES organizations(id)
         )
     """)
+
+    cursor.execute("PRAGMA table_info(users)")
+    existing_user_cols = [col[1] for col in cursor.fetchall()]
+    if "phone_encrypted" not in existing_user_cols:
+        cursor.execute("ALTER TABLE users ADD COLUMN phone_encrypted TEXT")
 
     # 4. Workers Operational Registry
     cursor.execute("""
@@ -200,11 +246,17 @@ def init_db():
             reported_symptoms TEXT DEFAULT '[]',
             active_alert_id TEXT,
             last_updated TEXT NOT NULL,
+            phone_encrypted TEXT,
             FOREIGN KEY (user_id) REFERENCES users(id),
             FOREIGN KEY (site_id) REFERENCES sites(id),
             FOREIGN KEY (zone_id) REFERENCES zones(id)
         )
     """)
+
+    cursor.execute("PRAGMA table_info(workers)")
+    existing_worker_cols = [col[1] for col in cursor.fetchall()]
+    if "phone_encrypted" not in existing_worker_cols:
+        cursor.execute("ALTER TABLE workers ADD COLUMN phone_encrypted TEXT")
 
     # 5. Fernet-Encrypted Health Table (Rule 9)
     cursor.execute("""
@@ -498,6 +550,98 @@ def init_db():
         )
     """)
 
+    # 18. Site Weather Cache & Manual Weather Overrides (Sprint 1)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS site_weather_cache (
+            site_id TEXT PRIMARY KEY,
+            fetched_at TEXT NOT NULL,
+            temperature_2m REAL NOT NULL,
+            relative_humidity_2m REAL NOT NULL,
+            wind_speed_10m REAL NOT NULL,
+            shortwave_radiation REAL NOT NULL,
+            wbgt_val REAL NOT NULL,
+            provider TEXT NOT NULL DEFAULT 'Open-Meteo',
+            source_tag TEXT NOT NULL DEFAULT 'external_verified',
+            is_stale INTEGER DEFAULT 0,
+            raw_json TEXT DEFAULT '{}'
+        )
+    """)
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS site_weather_manual (
+            site_id TEXT PRIMARY KEY,
+            submitted_at TEXT NOT NULL,
+            expires_at TEXT NOT NULL,
+            manual_type TEXT NOT NULL, -- 'instrument_wbgt' or 'temp_humidity'
+            temp_c REAL,
+            humidity_pct REAL,
+            instrument_wbgt REAL,
+            computed_wbgt REAL,
+            submitted_by TEXT,
+            notes TEXT
+        )
+    """)
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS site_weather_settings (
+            site_id TEXT PRIMARY KEY,
+            mode TEXT DEFAULT 'auto' -- 'auto' or 'manual'
+        )
+    """)
+
+    # 19. Emergency SOS Events (Sprint 2)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS sos_events (
+            id TEXT PRIMARY KEY,
+            worker_id TEXT NOT NULL,
+            worker_name TEXT NOT NULL,
+            site_id TEXT NOT NULL,
+            zone_id TEXT NOT NULL,
+            status TEXT NOT NULL, -- 'active', 'acknowledged', 'cancelled', 'escalated'
+            triggered_at TEXT NOT NULL,
+            acknowledged_at TEXT,
+            acknowledged_by TEXT,
+            acknowledgement_channel TEXT, -- 'app_tap', 'voice_press_1'
+            cancelled_at TEXT,
+            cancel_reason TEXT,
+            is_false_trigger INTEGER DEFAULT 0,
+            symptoms_json TEXT DEFAULT '[]',
+            latitude REAL,
+            longitude REAL,
+            escalation_level INTEGER DEFAULT 1, -- 1: Supervisor, 2: Safety Officer, 3: Site Medical
+            worker_lang TEXT DEFAULT 'en',
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (worker_id) REFERENCES workers(id)
+        )
+    """)
+
+    # 20. SOS Multi-Channel Dispatch Log (Sprint 2)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS sos_dispatch_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            event_id TEXT,
+            channel TEXT NOT NULL, -- 'websocket', 'push', 'voice', 'sms'
+            recipient_role TEXT NOT NULL, -- 'supervisor', 'safety_officer', 'medical'
+            recipient_contact TEXT,
+            status TEXT NOT NULL, -- 'simulated', 'sent', 'delivered', 'failed'
+            timestamp TEXT NOT NULL,
+            message TEXT NOT NULL,
+            mode TEXT NOT NULL, -- 'simulate', 'live'
+            details_json TEXT DEFAULT '{}'
+        )
+    """)
+
+    # 21. Web Push Subscriptions (Sprint 2)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS push_subscriptions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT NOT NULL,
+            endpoint TEXT NOT NULL UNIQUE,
+            keys_json TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        )
+    """)
+
     conn.commit()
     conn.close()
 
@@ -521,7 +665,9 @@ def seed_db():
         "health_private", "audit_log", "login_history",
         "readings_environmental", "readings_physiological", "alerts",
         "return_to_work_clearances", "interventions", "incidents", "notification_preferences",
-        "protocols", "shift_handovers", "near_misses", "safety_nudges", "passport_permissions"
+        "protocols", "shift_handovers", "near_misses", "safety_nudges", "passport_permissions",
+        "site_weather_cache", "site_weather_manual", "site_weather_settings",
+        "sos_events", "sos_dispatch_log", "push_subscriptions"
     ]:
         cursor.execute(f"DELETE FROM {table}")
 
@@ -542,11 +688,11 @@ def seed_db():
 
     # 2. 2 Sites x 3 Zones (6 zones total)
     sites_data = [
-        ("site-01", "org-01", "Delta Casting & Smelting Works", "40.7128 N, 74.0060 W", now_iso),
-        ("site-02", "org-01", "North Pier Rigging & Logistics Yard", "41.8781 N, 87.6298 W", now_iso)
+        ("site-01", "org-01", "Delta Casting & Smelting Works", "40.7128 N, 74.0060 W", 40.7128, -74.0060, now_iso),
+        ("site-02", "org-01", "North Pier Rigging & Logistics Yard", "41.8781 N, 87.6298 W", 41.8781, -87.6298, now_iso)
     ]
-    for sid, oid, sname, sloc, scrt in sites_data:
-        cursor.execute("INSERT INTO sites VALUES (?, ?, ?, ?, ?)", (sid, oid, sname, sloc, scrt))
+    for sid, oid, sname, sloc, slat, slon, scrt in sites_data:
+        cursor.execute("INSERT INTO sites (id, org_id, name, location, latitude, longitude, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)", (sid, oid, sname, sloc, slat, slon, scrt))
 
     zones_data = [
         # Site 1 Zones
@@ -563,13 +709,16 @@ def seed_db():
 
     # 3. 4 Role Logins
     role_users = [
-        ("usr-worker", "org-01", "worker1", "worker1@apexindustrial.com", common_pwd, "Alex Morgan", "worker", "active", 1, now_iso, now_iso),
-        ("usr-sup", "org-01", "supervisor", "supervisor@apexindustrial.com", common_pwd, "Marcus Vance", "supervisor", "active", 1, now_iso, now_iso),
-        ("usr-safety", "org-01", "safety_officer", "safety@apexindustrial.com", common_pwd, "Dr. Elena Rostova", "safety_officer", "active", 1, now_iso, now_iso),
-        ("usr-admin", "org-01", "admin", "admin@apexindustrial.com", hash_pwd("admin123"), "Arthur Pendelton", "admin", "active", 1, now_iso, now_iso),
+        ("usr-worker", "org-01", "worker1", "worker1@apexindustrial.com", common_pwd, "Alex Morgan", "worker", "active", 1, now_iso, now_iso, encrypt_phone("+1-555-019-2834")),
+        ("usr-sup", "org-01", "supervisor", "supervisor@apexindustrial.com", common_pwd, "Marcus Vance", "supervisor", "active", 1, now_iso, now_iso, encrypt_phone("+1-555-019-8800")),
+        ("usr-safety", "org-01", "safety_officer", "safety@apexindustrial.com", common_pwd, "Dr. Elena Rostova", "safety_officer", "active", 1, now_iso, now_iso, encrypt_phone("+1-555-019-9900")),
+        ("usr-admin", "org-01", "admin", "admin@apexindustrial.com", hash_pwd("admin123"), "Arthur Pendelton", "admin", "active", 1, now_iso, now_iso, encrypt_phone("+1-555-019-7700")),
     ]
     for u in role_users:
-        cursor.execute("INSERT INTO users VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?)", u)
+        cursor.execute("""
+            INSERT INTO users (id, org_id, username, email, password_hash, full_name, role, status, consent_given, consent_date, reset_token, reset_token_exp, created_at, phone_encrypted)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?)
+        """, u)
 
     # 4. 24 Workers across light, moderate, heavy work
     # We assign 4 workers per zone (6 zones x 4 = 24 workers)
@@ -592,12 +741,15 @@ def seed_db():
         name = worker_names[i]
         uname = f"worker{i+1}"
         email = f"worker{i+1}@apexindustrial.com"
+        worker_phone = "+1-555-019-2834" if i == 0 else f"+1-555-019-28{i:02d}"
+        enc_phone = encrypt_phone(worker_phone)
 
         # Create user account for worker if not already inserted
         if i > 0:
             cursor.execute("""
-                INSERT INTO users VALUES (?, 'org-01', ?, ?, ?, ?, 'worker', 'active', 1, ?, NULL, NULL, ?)
-            """, (uid, uname, email, common_pwd, name, now_iso, now_iso))
+                INSERT INTO users (id, org_id, username, email, password_hash, full_name, role, status, consent_given, consent_date, reset_token, reset_token_exp, created_at, phone_encrypted)
+                VALUES (?, 'org-01', ?, ?, ?, ?, 'worker', 'active', 1, ?, NULL, NULL, ?, ?)
+            """, (uid, uname, email, common_pwd, name, now_iso, now_iso, enc_phone))
 
         zone_idx = i // 4 # 4 workers per zone
         site_id = "site-01" if zone_idx < 3 else "site-02"
@@ -627,12 +779,17 @@ def seed_db():
             accom = "Day 2 acclimatization protocol: maximum 40% normal shift in direct heat."
 
         cursor.execute("""
-            INSERT INTO workers VALUES (
-                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '[]', NULL, ?
+            INSERT INTO workers (
+                id, user_id, site_id, zone_id, full_name, workload, acclimatization_status,
+                base_heart_rate, ppe_type, operational_accommodation, status, risk_level,
+                last_water_break, water_today_ml, reported_symptoms, active_alert_id,
+                last_updated, phone_encrypted
+            ) VALUES (
+                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '[]', NULL, ?, ?
             )
         """, (
             wid, uid, site_id, zone_id, name, workload, acclim, base_hr, ppe, accom,
-            status, risk_level, now_iso, 1250 if i == 0 else 850, now_iso
+            status, risk_level, now_iso, 1250 if i == 0 else 850, now_iso, enc_phone
         ))
 
         # Fernet-Encrypted Health Table (Rule 9)
@@ -1009,6 +1166,306 @@ def seed_db():
     conn.commit()
     conn.close()
     print("ThermoSense database successfully seeded with 1 org, 2 sites, 6 zones, 24 workers, 4 logins, and 30 days history.")
+
+
+# ---------------------------------------------------------------------------
+# Sprint 2 Emergency SOS & Escalation Database Helpers
+# ---------------------------------------------------------------------------
+
+def check_sos_rate_limit(worker_id: str, window_minutes: int = 10, max_allowed: int = 3) -> bool:
+    """Returns True if worker is under rate limit (< max_allowed in window), False otherwise."""
+    conn = get_db()
+    cursor = conn.cursor()
+    cutoff = (datetime.now(timezone.utc) - timedelta(minutes=window_minutes)).isoformat()
+    cursor.execute("""
+        SELECT COUNT(*) FROM sos_events
+        WHERE worker_id = ? AND triggered_at >= ?
+    """, (worker_id, cutoff))
+    count = cursor.fetchone()[0]
+    conn.close()
+    return count < max_allowed
+
+
+def create_sos_event(
+    worker_id: str,
+    symptoms: Optional[List[str]] = None,
+    lat: Optional[float] = None,
+    lon: Optional[float] = None,
+    lang: str = "en"
+) -> Dict[str, Any]:
+    """Creates a new active SOS emergency event and sets worker operational status."""
+    import uuid
+    conn = get_db()
+    cursor = conn.cursor()
+    
+    # Resolve worker details
+    cursor.execute("SELECT id, full_name, site_id, zone_id FROM workers WHERE id = ? OR user_id = ?", (worker_id, worker_id))
+    worker = cursor.fetchone()
+    if not worker:
+        conn.close()
+        raise ValueError(f"Worker {worker_id} not found")
+        
+    resolved_worker_id = worker["id"]
+    worker_name = worker["full_name"]
+    site_id = worker["site_id"]
+    zone_id = worker["zone_id"]
+    now_iso = datetime.now(timezone.utc).isoformat()
+    event_id = f"SOS-{uuid.uuid4().hex[:8].upper()}"
+    symptoms_list = symptoms or []
+
+    cursor.execute("""
+        INSERT INTO sos_events (
+            id, worker_id, worker_name, site_id, zone_id, status, triggered_at,
+            is_false_trigger, symptoms_json, latitude, longitude, escalation_level,
+            worker_lang, created_at
+        ) VALUES (?, ?, ?, ?, ?, 'active', ?, 0, ?, ?, ?, 1, ?, ?)
+    """, (
+        event_id, resolved_worker_id, worker_name, site_id, zone_id, now_iso,
+        json.dumps(symptoms_list), lat, lon, lang, now_iso
+    ))
+
+    # Elevate worker to Emergency
+    cursor.execute("""
+        UPDATE workers
+        SET risk_level = 'Emergency',
+            status = 'Emergency SOS',
+            reported_symptoms = ?,
+            last_updated = ?
+        WHERE id = ?
+    """, (json.dumps(symptoms_list), now_iso, resolved_worker_id))
+
+    conn.commit()
+    cursor.execute("SELECT * FROM sos_events WHERE id = ?", (event_id,))
+    row = dict(cursor.fetchone())
+    conn.close()
+
+    log_audit(
+        resolved_worker_id, worker_name, "worker", "SOS_TRIGGERED",
+        resource=event_id, details=f"Emergency SOS triggered. Symptoms: {symptoms_list}"
+    )
+
+    return row
+
+
+def cancel_sos_event(
+    event_id: str,
+    reason: str = "Worker indicated false trigger",
+    cancelled_by: str = "worker"
+) -> Optional[Dict[str, Any]]:
+    """Cancels active SOS event and records it as a false-trigger."""
+    conn = get_db()
+    cursor = conn.cursor()
+    now_iso = datetime.now(timezone.utc).isoformat()
+
+    cursor.execute("SELECT * FROM sos_events WHERE id = ?", (event_id,))
+    event = cursor.fetchone()
+    if not event:
+        conn.close()
+        return None
+
+    worker_id = event["worker_id"]
+
+    cursor.execute("""
+        UPDATE sos_events
+        SET status = 'cancelled',
+            cancelled_at = ?,
+            cancel_reason = ?,
+            is_false_trigger = 1
+        WHERE id = ?
+    """, (now_iso, reason, event_id))
+
+    # Revert worker status to Active
+    cursor.execute("""
+        UPDATE workers
+        SET risk_level = 'Normal',
+            status = 'Active',
+            reported_symptoms = '[]',
+            last_updated = ?
+        WHERE id = ?
+    """, (now_iso, worker_id))
+
+    conn.commit()
+    cursor.execute("SELECT * FROM sos_events WHERE id = ?", (event_id,))
+    row = dict(cursor.fetchone())
+    conn.close()
+
+    log_audit(
+        cancelled_by, cancelled_by, "worker", "SOS_CANCELLED_FALSE_TRIGGER",
+        resource=event_id, details=f"SOS cancelled: {reason} (logged as false-trigger)"
+    )
+
+    return row
+
+
+def acknowledge_sos_event(
+    event_id: str,
+    ack_by: str,
+    channel: str = "app_tap"
+) -> Optional[Dict[str, Any]]:
+    """Acknowledges an active SOS event, stopping further escalation."""
+    conn = get_db()
+    cursor = conn.cursor()
+    now_iso = datetime.now(timezone.utc).isoformat()
+
+    cursor.execute("SELECT * FROM sos_events WHERE id = ?", (event_id,))
+    event = cursor.fetchone()
+    if not event:
+        conn.close()
+        return None
+
+    cursor.execute("""
+        UPDATE sos_events
+        SET status = 'acknowledged',
+            acknowledged_at = ?,
+            acknowledged_by = ?,
+            acknowledgement_channel = ?
+        WHERE id = ?
+    """, (now_iso, ack_by, channel, event_id))
+
+    conn.commit()
+    cursor.execute("SELECT * FROM sos_events WHERE id = ?", (event_id,))
+    row = dict(cursor.fetchone())
+    conn.close()
+
+    log_audit(
+        ack_by, ack_by, "supervisor", "SOS_ACKNOWLEDGED",
+        resource=event_id, details=f"SOS acknowledged via {channel}"
+    )
+
+    return row
+
+
+def escalate_sos_event(event_id: str, new_level: int) -> Optional[Dict[str, Any]]:
+    """Updates escalation level for active SOS event (1: Supervisor, 2: Safety Officer, 3: Site Medical)."""
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute("""
+        UPDATE sos_events
+        SET escalation_level = ?
+        WHERE id = ? AND status = 'active'
+    """, (new_level, event_id))
+    conn.commit()
+    cursor.execute("SELECT * FROM sos_events WHERE id = ?", (event_id,))
+    row = cursor.fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def get_active_sos() -> List[Dict[str, Any]]:
+    """Returns all currently active SOS events with worker, site, and zone details."""
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT e.*, s.name as site_name, z.name as zone_name
+        FROM sos_events e
+        LEFT JOIN sites s ON e.site_id = s.id
+        LEFT JOIN zones z ON e.zone_id = z.id
+        WHERE e.status = 'active'
+        ORDER BY e.triggered_at DESC
+    """)
+    rows = cursor.fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def get_sos_by_id(event_id: str) -> Optional[Dict[str, Any]]:
+    """Fetches a specific SOS event."""
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT e.*, s.name as site_name, z.name as zone_name
+        FROM sos_events e
+        LEFT JOIN sites s ON e.site_id = s.id
+        LEFT JOIN zones z ON e.zone_id = z.id
+        WHERE e.id = ?
+    """, (event_id,))
+    row = cursor.fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def log_sos_dispatch(
+    event_id: str,
+    channel: str,
+    recipient_role: str,
+    status: str,
+    message: str,
+    mode: str,
+    recipient_contact: str = "",
+    details_json: str = "{}"
+) -> int:
+    """Writes a row to sos_dispatch_log (Rule: channel, recipient_role, status, timestamp, message, mode)."""
+    conn = get_db()
+    cursor = conn.cursor()
+    now_iso = datetime.now(timezone.utc).isoformat()
+    cursor.execute("""
+        INSERT INTO sos_dispatch_log (
+            event_id, channel, recipient_role, recipient_contact,
+            status, timestamp, message, mode, details_json
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (
+        event_id, channel, recipient_role, recipient_contact,
+        status, now_iso, message, mode, details_json
+    ))
+    log_id = cursor.lastrowid
+    conn.commit()
+    conn.close()
+    return log_id
+
+
+def get_sos_dispatch_logs(event_id: Optional[str] = None, limit: int = 100) -> List[Dict[str, Any]]:
+    """Fetches dispatch audit logs for live display."""
+    conn = get_db()
+    cursor = conn.cursor()
+    if event_id:
+        cursor.execute("""
+            SELECT * FROM sos_dispatch_log
+            WHERE event_id = ?
+            ORDER BY id DESC LIMIT ?
+        """, (event_id, limit))
+    else:
+        cursor.execute("""
+            SELECT * FROM sos_dispatch_log
+            ORDER BY id DESC LIMIT ?
+        """, (limit,))
+    rows = cursor.fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def save_push_subscription(user_id: str, endpoint: str, keys_json: str) -> None:
+    """Stores Web Push subscription for a user."""
+    conn = get_db()
+    cursor = conn.cursor()
+    now_iso = datetime.now(timezone.utc).isoformat()
+    cursor.execute("""
+        INSERT INTO push_subscriptions (user_id, endpoint, keys_json, created_at)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(endpoint) DO UPDATE SET
+            user_id = excluded.user_id,
+            keys_json = excluded.keys_json,
+            created_at = excluded.created_at
+    """, (user_id, endpoint, keys_json, now_iso))
+    conn.commit()
+    conn.close()
+
+
+def get_push_subscriptions(role: Optional[str] = None) -> List[Dict[str, Any]]:
+    """Retrieves Web Push subscriptions, optionally filtered by user role."""
+    conn = get_db()
+    cursor = conn.cursor()
+    if role:
+        cursor.execute("""
+            SELECT ps.* FROM push_subscriptions ps
+            JOIN users u ON ps.user_id = u.id
+            WHERE u.role = ?
+        """, (role,))
+    else:
+        cursor.execute("SELECT * FROM push_subscriptions")
+    rows = cursor.fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
 
 
 if __name__ == "__main__":

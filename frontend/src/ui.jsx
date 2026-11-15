@@ -11,13 +11,24 @@ import {
   FileText,
   Database,
   SlidersHorizontal,
-  X
+  X,
+  Clock,
+  RefreshCw,
+  AlertCircle
 } from 'lucide-react';
+
+export const ROLES = {
+  WORKER: 'worker',
+  SUPERVISOR: 'supervisor',
+  SAFETY_OFFICER: 'safety_officer',
+  ADMIN: 'admin'
+};
 
 /**
  * Rule 6: Persistent demo mode banner
  */
-export function DemoBanner() {
+export function DemoBanner({ show = true }) {
+  if (!show) return null;
   return (
     <div className="bg-amber-950/80 border-b border-amber-600/40 text-amber-200 px-4 py-1.5 text-xs font-semibold tracking-wide flex items-center justify-between sticky top-0 z-50 backdrop-blur-sm">
       <div className="flex items-center gap-2 mx-auto">
@@ -99,8 +110,8 @@ export function RiskBadge({ level, size = "md" }) {
  * Rule 6: Every reading shows a source tag: Simulated, Manual, Imported or Verified external.
  * Simulated data is never presented as a sensor measurement.
  */
-export function SourceTag({ source }) {
-  const s = source || "Simulated";
+export function SourceTag({ source, provider = null, age = null, isStale = false, size = "sm" }) {
+  const s = (source || "Simulated").toLowerCase();
 
   let badgeProps = {
     icon: Cpu,
@@ -108,36 +119,219 @@ export function SourceTag({ source }) {
     classes: "border-purple-600/40 bg-purple-950/40 text-purple-300"
   };
 
-  if (s === "Manual") {
+  if (s.includes("manual")) {
     badgeProps = {
       icon: FileText,
       label: "Manual Entry",
       classes: "border-blue-500/50 bg-blue-950/50 text-blue-300"
     };
-  } else if (s === "Imported") {
+  } else if (s.includes("import")) {
     badgeProps = {
       icon: Database,
       label: "Imported Feed",
       classes: "border-cyan-600/40 bg-cyan-950/40 text-cyan-300"
     };
-  } else if (s === "Verified external") {
+  } else if (s.includes("external") || s.includes("verified")) {
     badgeProps = {
       icon: ShieldCheck,
-      label: "Verified external",
-      classes: "border-emerald-500/50 bg-emerald-950/50 text-emerald-300"
+      label: provider ? `External (${provider})` : "Verified external",
+      classes: isStale
+        ? "border-amber-500/60 bg-amber-950/50 text-amber-300"
+        : "border-emerald-500/50 bg-emerald-950/50 text-emerald-300"
     };
   }
 
   const Icon = badgeProps.icon;
+  const sizeClasses = size === "xs" ? "px-1.5 py-0.2 text-[10px]" : "px-2 py-0.5 text-[11px]";
 
   return (
     <span
-      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium border ${badgeProps.classes}`}
-      title={`Data origin: ${badgeProps.label}. Simulated data is not a direct sensor telemetry.`}
+      className={`inline-flex items-center gap-1 rounded font-medium border ${badgeProps.classes} ${sizeClasses}`}
+      title={`Data origin: ${badgeProps.label}${isStale ? " (STALE >30m)" : ""}${age ? ` • Age: ${age}` : ""}`}
     >
       <Icon className="w-3 h-3 shrink-0" aria-hidden="true" />
       <span>{badgeProps.label}</span>
+      {isStale && <span className="text-[10px] text-amber-400 font-bold ml-0.5">(STALE)</span>}
+      {age && <span className="text-[10px] opacity-75 font-mono ml-0.5">{age}</span>}
     </span>
+  );
+}
+
+/**
+ * ChartCard container with accessible headers and actions
+ */
+export function ChartCard({ title, subtitle = null, badge = null, action = null, children, className = "" }) {
+  return (
+    <Card className={`relative overflow-hidden ${className}`}>
+      {(title || subtitle || badge || action) && (
+        <div className="flex flex-wrap items-center justify-between gap-2 mb-3 pb-2 border-b border-industrial-800">
+          <div>
+            <div className="flex items-center gap-2">
+              {title && <h3 className="font-semibold text-slate-100 text-sm tracking-wide">{title}</h3>}
+              {badge && <div>{badge}</div>}
+            </div>
+            {subtitle && <p className="text-xs text-slate-400 mt-0.5">{subtitle}</p>}
+          </div>
+          {action && <div>{action}</div>}
+        </div>
+      )}
+      <div className="w-full">{children}</div>
+    </Card>
+  );
+}
+
+/**
+ * Accessible EmptyState Placeholder
+ */
+export function EmptyState({
+  icon: Icon = FileText,
+  title = "No data available",
+  message = "No records match the current filter or criteria.",
+  actionText = null,
+  onAction = null,
+  className = ""
+}) {
+  return (
+    <div className={`p-8 rounded-lg border border-dashed border-industrial-700/80 bg-industrial-950/50 text-center flex flex-col items-center justify-center my-4 ${className}`}>
+      <div className="w-10 h-10 rounded-full bg-industrial-900 border border-industrial-700 flex items-center justify-center text-slate-400 mb-3">
+        <Icon className="w-5 h-5" aria-hidden="true" />
+      </div>
+      <h4 className="text-sm font-semibold text-slate-200 mb-1">{title}</h4>
+      <p className="text-xs text-slate-400 max-w-sm mb-4 leading-relaxed">{message}</p>
+      {actionText && onAction && (
+        <Button onClick={onAction} variant="secondary" size="sm">
+          {actionText}
+        </Button>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Skeleton Loader
+ */
+export function Skeleton({ variant = "line", width, height, className = "" }) {
+  const base = "animate-pulse bg-industrial-800/80 rounded";
+  const style = {};
+  if (width) style.width = width;
+  if (height) style.height = height;
+
+  if (variant === "circle") {
+    return <div className={`${base} rounded-full ${className}`} style={{ width: width || 40, height: height || 40, ...style }} />;
+  }
+  if (variant === "rect") {
+    return <div className={`${base} ${className}`} style={{ height: height || 120, ...style }} />;
+  }
+  return <div className={`${base} h-4 w-full my-1.5 ${className}`} style={style} />;
+}
+
+/**
+ * Toast Notifications Container
+ */
+export function Toast({ toasts = [], onDismiss }) {
+  if (!toasts || toasts.length === 0) return null;
+
+  return (
+    <div className="fixed bottom-5 right-5 z-50 flex flex-col gap-2 max-w-sm w-full pointer-events-none">
+      {toasts.map((t) => {
+        const typeClasses = {
+          success: "border-emerald-500/80 bg-emerald-950/95 text-emerald-200",
+          error: "border-red-500/80 bg-red-950/95 text-red-200",
+          warning: "border-amber-500/80 bg-amber-950/95 text-amber-200",
+          info: "border-sky-500/80 bg-sky-950/95 text-sky-200"
+        }[t.type || "info"];
+
+        return (
+          <div
+            key={t.id || Math.random()}
+            className={`pointer-events-auto p-3 rounded-lg border shadow-xl text-xs flex items-start justify-between gap-2.5 backdrop-blur-md animate-in slide-in-from-bottom-2 ${typeClasses}`}
+            role="alert"
+          >
+            <div className="flex-1">
+              {t.title && <div className="font-bold text-white mb-0.5">{t.title}</div>}
+              <div className="text-[11px] leading-relaxed">{t.message}</div>
+            </div>
+            {onDismiss && (
+              <button
+                type="button"
+                onClick={() => onDismiss(t.id)}
+                className="text-slate-400 hover:text-white p-0.5 rounded"
+                aria-label="Dismiss notification"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/**
+ * Accessible Slide-Out Drawer
+ */
+export function Drawer({ isOpen, onClose, title, children, footer = null, position = "right" }) {
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex bg-black/75 backdrop-blur-sm" role="dialog" aria-modal="true">
+      <div className="fixed inset-0" onClick={onClose} aria-hidden="true" />
+      <div className="relative ml-auto w-full max-w-md bg-industrial-900 border-l border-industrial-700 h-full flex flex-col shadow-2xl z-10 animate-in slide-in-from-right duration-200">
+        <div className="flex items-center justify-between p-4 border-b border-industrial-800">
+          <h2 className="text-sm font-bold text-slate-100">{title}</h2>
+          <button
+            type="button"
+            onClick={onClose}
+            className="text-slate-400 hover:text-slate-200 p-1 rounded"
+            aria-label="Close drawer"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+        <div className="flex-1 overflow-y-auto p-4">{children}</div>
+        {footer && <div className="p-4 border-t border-industrial-800 bg-industrial-950/80">{footer}</div>}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * ConfirmDialog Modal
+ */
+export function ConfirmDialog({
+  isOpen,
+  onClose,
+  onConfirm,
+  title = "Confirm Action",
+  message = "Are you sure you want to proceed?",
+  confirmText = "Confirm",
+  cancelText = "Cancel",
+  danger = false,
+  loading = false
+}) {
+  if (!isOpen) return null;
+
+  return (
+    <Modal isOpen={isOpen} onClose={onClose} title={title}>
+      <div className="space-y-4 text-xs text-slate-300">
+        <p className="leading-relaxed">{message}</p>
+        <div className="flex items-center justify-end gap-2 pt-3 border-t border-industrial-800">
+          <Button type="button" variant="secondary" size="sm" onClick={onClose} disabled={loading}>
+            {cancelText}
+          </Button>
+          <Button
+            type="button"
+            variant={danger ? "danger" : "primary"}
+            size="sm"
+            onClick={onConfirm}
+            disabled={loading}
+          >
+            {loading ? "Processing..." : confirmText}
+          </Button>
+        </div>
+      </div>
+    </Modal>
   );
 }
 
@@ -396,6 +590,57 @@ export function playAlertSound(isEmergency = false) {
     osc.stop(ctx.currentTime + (isEmergency ? 0.45 : 0.3));
   } catch (e) {
     // Ignore audio autoplay restrictions
+  }
+}
+
+/**
+ * Continuous looping siren using Web Audio API for supervisor emergency takeover
+ * Returns a function that stops the siren immediately
+ */
+export function startEmergencySiren() {
+  try {
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContextClass) return () => {};
+    const ctx = new AudioContextClass();
+    if (ctx.state === 'suspended') {
+      ctx.resume().catch(() => {});
+    }
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(750, ctx.currentTime);
+
+    let isHigh = false;
+    const interval = setInterval(() => {
+      if (ctx.state === 'closed') {
+        clearInterval(interval);
+        return;
+      }
+      isHigh = !isHigh;
+      try {
+        osc.frequency.setTargetAtTime(isHigh ? 1150 : 700, ctx.currentTime, 0.12);
+      } catch (err) {}
+    }, 450);
+
+    gain.gain.setValueAtTime(0.18, ctx.currentTime);
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start();
+
+    return () => {
+      clearInterval(interval);
+      try {
+        gain.gain.setTargetAtTime(0.001, ctx.currentTime, 0.05);
+        setTimeout(() => {
+          try {
+            osc.stop();
+            ctx.close();
+          } catch (e) {}
+        }, 80);
+      } catch (e) {}
+    };
+  } catch (e) {
+    return () => {};
   }
 }
 

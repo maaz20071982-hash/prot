@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   LayoutDashboard,
   Users,
@@ -28,7 +28,9 @@ import {
   ChevronRight,
   UserCheck,
   Building2,
-  HelpCircle
+  HelpCircle,
+  Phone,
+  PhoneCall
 } from 'lucide-react';
 import {
   BarChart,
@@ -54,7 +56,8 @@ import {
   Textarea,
   SeverityBadge,
   RecoveryIndicatorPill,
-  playAlertSound
+  playAlertSound,
+  startEmergencySiren
 } from './ui';
 
 export function Command() {
@@ -89,6 +92,15 @@ export function Command() {
   const [targetIntervention, setTargetIntervention] = useState(null);
   const [clearInterventionModalOpen, setClearInterventionModalOpen] = useState(false);
 
+  // Sprint 2 Active SOS Takeover & Looping Siren
+  const [activeSosList, setActiveSosList] = useState([]);
+  const [selectedSos, setSelectedSos] = useState(null);
+  const [dispatchLogs, setDispatchLogs] = useState([]);
+  const [alarmSirenPlaying, setAlarmSirenPlaying] = useState(false);
+  const stopSirenRef = useRef(null);
+  const [callStatusMessage, setCallStatusMessage] = useState('');
+  const [sosTakeoverOpen, setSosTakeoverOpen] = useState(false);
+
   // Intervention forms
   const [vitalsHr, setVitalsHr] = useState(88);
   const [vitalsTemp, setVitalsTemp] = useState(37.2);
@@ -107,12 +119,63 @@ export function Command() {
   const [manualWbgt, setManualWbgt] = useState(29.4);
   const [manualInstrument, setManualInstrument] = useState('Calibrated QuestTemp 34 WBGT');
 
+  // Automatic Open-Meteo & Manual Weather state (Sprint 1)
+  const [weatherData, setWeatherData] = useState(null);
+  const [weatherLoading, setWeatherLoading] = useState(false);
+  const [weatherMode, setWeatherMode] = useState('auto');
+  const [weatherCountdown, setWeatherCountdown] = useState(null);
+
   const [activeTab, setActiveTab] = useState('overview'); // 'overview', 'map', 'interventions', 'alerts'
+
+  async function loadWeatherData(siteId = selectedSite || '1') {
+    setWeatherLoading(true);
+    try {
+      const data = await api.weather.get(siteId);
+      setWeatherData(data);
+      if (data.mode) setWeatherMode(data.mode);
+      if (data.manual_countdown_seconds) setWeatherCountdown(data.manual_countdown_seconds);
+    } catch (e) {
+      console.warn("Weather fetch error:", e);
+    } finally {
+      setWeatherLoading(false);
+    }
+  }
+
+  async function handleRefreshWeather() {
+    setWeatherLoading(true);
+    try {
+      await api.weather.refresh(selectedSite || '1');
+      await loadWeatherData(selectedSite || '1');
+      await loadAllData();
+    } catch (e) {
+      alert("Weather refresh failed: " + e.message);
+    } finally {
+      setWeatherLoading(false);
+    }
+  }
+
+  async function handleToggleWeatherMode(newMode) {
+    try {
+      await api.weather.setMode(selectedSite || '1', newMode);
+      await loadWeatherData(selectedSite || '1');
+      await loadAllData();
+    } catch (e) {
+      alert("Mode change failed: " + e.message);
+    }
+  }
+
+  useEffect(() => {
+    if (weatherCountdown === null || weatherCountdown <= 0) return;
+    const t = setInterval(() => {
+      setWeatherCountdown((prev) => (prev > 0 ? prev - 1 : 0));
+    }, 1000);
+    return () => clearInterval(t);
+  }, [weatherCountdown]);
 
   async function loadAllData() {
     setLoading(true);
     try {
-      const [sumRes, wfRes, zRes, altRes, intRes, mapRes] = await Promise.all([
+      const [sumRes, wfRes, zRes, altRes, intRes, mapRes, sosRes] = await Promise.all([
         api.getCommandSummary().catch(() => null),
         api.getWorkforce({
           site_id: selectedSite,
@@ -124,7 +187,8 @@ export function Command() {
         api.getZones().catch(() => []),
         api.getAlerts().catch(() => []),
         api.getActiveInterventions().catch(() => []),
-        api.getMapLayout().catch(() => null)
+        api.getMapLayout().catch(() => null),
+        api.sos.getActive().catch(() => [])
       ]);
 
       if (sumRes) setSummary(sumRes);
@@ -133,10 +197,34 @@ export function Command() {
       setAlerts(altRes || []);
       setInterventions(intRes || []);
       setMapData(mapRes);
+      loadWeatherData(selectedSite || '1');
+
+      if (sosRes && sosRes.length > 0) {
+        setActiveSosList(sosRes);
+        setSelectedSos(sosRes[0]);
+        setSosTakeoverOpen(true);
+        api.sos.getDispatchLogs(sosRes[0].id).then(setDispatchLogs).catch(() => {});
+        if (soundEnabled && !alarmSirenPlaying) {
+          const stopper = startEmergencySiren();
+          stopSirenRef.current = stopper;
+          setAlarmSirenPlaying(true);
+        }
+      } else {
+        setActiveSosList([]);
+        setSelectedSos(null);
+        setSosTakeoverOpen(false);
+        if (alarmSirenPlaying) {
+          if (stopSirenRef.current) {
+            stopSirenRef.current();
+            stopSirenRef.current = null;
+          }
+          setAlarmSirenPlaying(false);
+        }
+      }
 
       // Check if critical alert requires sound notification
       const hasEmergency = altRes?.some((a) => a.level === 'Emergency' && a.ack_status === 'Unacknowledged' && !a.is_false_alert);
-      if (hasEmergency && soundEnabled) {
+      if (hasEmergency && soundEnabled && !sosRes?.length) {
         playAlertSound(true);
       }
     } catch (err) {
@@ -145,6 +233,49 @@ export function Command() {
       setLoading(false);
     }
   }
+
+  const handleAcknowledgeSos = async (eventId) => {
+    try {
+      await api.sos.acknowledge(eventId);
+      if (stopSirenRef.current) {
+        stopSirenRef.current();
+        stopSirenRef.current = null;
+      }
+      setAlarmSirenPlaying(false);
+      setSosTakeoverOpen(false);
+      await loadAllData();
+    } catch (err) {
+      alert("Error acknowledging SOS: " + err.message);
+    }
+  };
+
+  const handleCallWorker = async (workerId) => {
+    try {
+      const res = await api.sos.callWorker(workerId);
+      setCallStatusMessage(`Direct voice call placed to worker (${res.masked_phone}). Mode: ${res.mode}`);
+      setTimeout(() => setCallStatusMessage(''), 5000);
+      if (selectedSos) {
+        const logs = await api.sos.getDispatchLogs(selectedSos.id);
+        setDispatchLogs(logs);
+      }
+    } catch (err) {
+      alert("Call worker failed: " + err.message);
+    }
+  };
+
+  const toggleSirenAudio = () => {
+    if (alarmSirenPlaying) {
+      if (stopSirenRef.current) {
+        stopSirenRef.current();
+        stopSirenRef.current = null;
+      }
+      setAlarmSirenPlaying(false);
+    } else {
+      const stopper = startEmergencySiren();
+      stopSirenRef.current = stopper;
+      setAlarmSirenPlaying(true);
+    }
+  };
 
   useEffect(() => {
     loadAllData();
@@ -175,15 +306,22 @@ export function Command() {
   const handleSubmitManual = async (e) => {
     e.preventDefault();
     try {
+      await api.weather.submitManual(selectedSite || '1', {
+        temp_c: parseFloat(manualTemp),
+        humidity_pct: parseFloat(manualHum),
+        wbgt_c: parseFloat(manualWbgt),
+        instrument: manualInstrument
+      });
       await api.submitManualReading({
         zone_id: manualZone,
         temp_c: parseFloat(manualTemp),
         humidity_pct: parseFloat(manualHum),
         measured_wbgt: parseFloat(manualWbgt),
         instrument_name: manualInstrument
-      });
+      }).catch(() => {});
       setManualEntryOpen(false);
-      loadAllData();
+      await loadWeatherData(selectedSite || '1');
+      await loadAllData();
     } catch (err) {
       alert("Manual entry error: " + err.message);
     }
@@ -264,6 +402,215 @@ export function Command() {
 
   return (
     <div className="space-y-4">
+      {/* Sprint 2 Persistent Emergency Alert Strip */}
+      {activeSosList.length > 0 && (
+        <div className="p-3.5 bg-gradient-to-r from-red-600 via-rose-600 to-red-700 text-white rounded-xl shadow-xl flex items-center justify-between gap-3 animate-pulse border-2 border-red-400">
+          <div className="flex items-center gap-2.5">
+            <Flame className="w-5 h-5 text-amber-200 shrink-0" />
+            <div>
+              <span className="font-black text-xs sm:text-sm tracking-wide uppercase">
+                CRITICAL: {activeSosList.length} ACTIVE EMERGENCY SOS SIGNAL(S) TRIGGERED
+              </span>
+              <p className="text-[11px] text-red-100">
+                Worker: {activeSosList[0].worker_name} ({activeSosList[0].site_name || 'Site 1'}, {activeSosList[0].zone_name || 'Zone 1A'}) • Possible heat-related emergency.
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={toggleSirenAudio}
+              className="px-2.5 py-1.5 rounded-lg bg-black/40 hover:bg-black/60 text-xs font-bold border border-white/30 flex items-center gap-1.5"
+            >
+              {alarmSirenPlaying ? <Volume2 className="w-3.5 h-3.5 text-amber-300" /> : <VolumeX className="w-3.5 h-3.5 text-slate-300" />}
+              <span>{alarmSirenPlaying ? 'Mute Siren' : 'Enable Siren'}</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setSelectedSos(activeSosList[0]);
+                setSosTakeoverOpen(true);
+              }}
+              className="px-3 py-1.5 rounded-lg bg-white text-red-700 hover:bg-red-50 text-xs font-black uppercase tracking-wider shadow"
+            >
+              Open Alarm Takeover
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Sprint 2 Full-Screen Emergency Alarm Takeover */}
+      {sosTakeoverOpen && selectedSos && (
+        <div className="fixed inset-0 z-50 bg-black/90 backdrop-blur-md flex flex-col p-4 sm:p-6 overflow-y-auto">
+          <div className="max-w-4xl w-full mx-auto my-auto space-y-4">
+            {/* Flashing Banner */}
+            <div className="p-4 bg-gradient-to-r from-red-700 via-rose-700 to-red-800 border-2 border-red-400 rounded-2xl shadow-2xl text-white flex flex-col sm:flex-row items-center justify-between gap-3 animate-pulse">
+              <div className="flex items-center gap-3">
+                <div className="p-3 bg-red-950 rounded-xl border border-red-300">
+                  <ShieldAlert className="w-8 h-8 text-amber-300" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-black tracking-widest uppercase bg-black/40 px-2.5 py-0.5 rounded-full border border-red-300 text-amber-300">
+                      {selectedSos.id} • STAGE {selectedSos.escalation_level} ESCALATION
+                    </span>
+                    <span className="text-xs font-mono text-red-200">
+                      {new Date(selectedSos.triggered_at).toLocaleTimeString()}
+                    </span>
+                  </div>
+                  <h2 className="text-lg sm:text-xl font-black text-white mt-1">
+                    EMERGENCY SOS: IMMEDIATE RESPONSE REQUIRED
+                  </h2>
+                  <p className="text-xs text-red-100">
+                    Rule 4 compliance: Possible heat-related emergency flagged. Automated voice/SMS and push dispatched.
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={toggleSirenAudio}
+                className="px-3 py-2 rounded-xl bg-black/50 hover:bg-black/70 text-xs font-bold text-amber-300 border border-amber-400 flex items-center gap-2 shrink-0"
+              >
+                {alarmSirenPlaying ? <Volume2 className="w-4 h-4 text-amber-300" /> : <VolumeX className="w-4 h-4 text-slate-400" />}
+                <span>{alarmSirenPlaying ? 'Mute Siren Audio' : 'Enable Alarm Sound'}</span>
+              </button>
+            </div>
+
+            {/* Worker Details & Live Telemetry Readings */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-slate-200">
+              {/* Card 1: Worker Identity & Location */}
+              <div className="bg-industrial-900 border border-industrial-800 rounded-2xl p-4 space-y-2">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">Worker Identity & Location</span>
+                <div className="flex items-center gap-2">
+                  <User className="w-4 h-4 text-sky-400" />
+                  <span className="text-sm font-bold text-white">{selectedSos.worker_name}</span>
+                  <span className="text-xs font-mono text-slate-400">({selectedSos.worker_id})</span>
+                </div>
+                <div className="text-xs text-slate-300 space-y-1 pt-1 border-t border-industrial-800">
+                  <p className="flex items-center gap-1.5"><MapPin className="w-3.5 h-3.5 text-slate-500" /> {selectedSos.site_name || 'Site 1'}</p>
+                  <p className="text-amber-300 font-medium pl-5">{selectedSos.zone_name || 'Zone 1A: Blast Furnace'}</p>
+                  <p className="text-[11px] text-slate-400 pl-5">GPS: {selectedSos.latitude ? `${selectedSos.latitude.toFixed(4)}, ${selectedSos.longitude.toFixed(4)}` : 'On-site floor coordinates'}</p>
+                </div>
+              </div>
+
+              {/* Card 2: Symptoms & Risk Level */}
+              <div className="bg-industrial-900 border border-industrial-800 rounded-2xl p-4 space-y-2">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">Distress Symptoms Flagged</span>
+                <div className="flex flex-wrap gap-1 pt-1">
+                  {(() => {
+                    let syms = [];
+                    try { syms = typeof selectedSos.symptoms_json === 'string' ? JSON.parse(selectedSos.symptoms_json) : selectedSos.symptoms_json; } catch(e){}
+                    if (!syms || !syms.length) syms = ['manual_emergency_hold'];
+                    return syms.map((s, idx) => (
+                      <span key={idx} className="px-2 py-0.5 rounded bg-red-950 text-red-200 border border-red-500 font-mono text-[10px] uppercase font-bold">
+                        {String(s).replace('_', ' ')}
+                      </span>
+                    ));
+                  })()}
+                </div>
+                <div className="pt-2 border-t border-industrial-800 flex items-center justify-between text-xs">
+                  <span className="text-slate-400">Risk Severity:</span>
+                  <RiskBadge level="Emergency" size="sm" />
+                </div>
+              </div>
+
+              {/* Card 3: Action Buttons */}
+              <div className="bg-industrial-900 border border-industrial-800 rounded-2xl p-4 flex flex-col justify-between space-y-2">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">Supervisor Actions</span>
+                <div className="space-y-2">
+                  <Button
+                    type="button"
+                    variant="primary"
+                    size="md"
+                    className="w-full justify-center bg-emerald-600 hover:bg-emerald-500 font-bold"
+                    onClick={() => handleAcknowledgeSos(selectedSos.id)}
+                  >
+                    <CheckCircle2 className="w-4 h-4" />
+                    <span>Acknowledge Emergency (Halt Escalation)</span>
+                  </Button>
+
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="md"
+                    className="w-full justify-center border-sky-500 text-sky-300 hover:bg-sky-950"
+                    onClick={() => handleCallWorker(selectedSos.worker_id)}
+                  >
+                    <PhoneCall className="w-4 h-4 text-sky-400" />
+                    <span>Call Worker Now (Voice)</span>
+                  </Button>
+                </div>
+              </div>
+            </div>
+
+            {callStatusMessage && (
+              <p className="p-2.5 rounded-xl bg-sky-950 border border-sky-600/50 text-xs text-sky-200 text-center font-medium animate-pulse">
+                {callStatusMessage}
+              </p>
+            )}
+
+            {/* Live Dispatch-Log Panel */}
+            <div className="bg-industrial-900 border border-industrial-800 rounded-2xl p-4 space-y-2 text-xs">
+              <div className="flex items-center justify-between border-b border-industrial-800 pb-2">
+                <div className="flex items-center gap-2 text-slate-300 font-semibold">
+                  <Activity className="w-4 h-4 text-sky-400" />
+                  <span>Multi-Channel Live Dispatch Audit Log</span>
+                </div>
+                <span className="text-[10px] text-slate-400 font-mono">
+                  Channels: WebSocket • Web Push • SMS • Voice
+                </span>
+              </div>
+
+              <div className="max-h-48 overflow-y-auto space-y-1.5 pt-1">
+                {dispatchLogs.length === 0 ? (
+                  <p className="text-slate-500 text-center py-4">Awaiting dispatch log confirmations...</p>
+                ) : (
+                  dispatchLogs.map((log) => (
+                    <div key={log.id} className="flex items-center justify-between p-2 rounded-xl bg-industrial-950 border border-industrial-800 text-[11px]">
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono uppercase px-1.5 py-0.5 rounded text-[10px] bg-industrial-800 text-slate-300">
+                          {log.channel}
+                        </span>
+                        <span className="text-slate-300 font-semibold capitalize">{log.recipient_role}</span>
+                        {log.recipient_contact && (
+                          <span className="font-mono text-slate-400">{log.recipient_contact}</span>
+                        )}
+                        <span className="text-slate-400 truncate max-w-xs">{log.message}</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className={`px-2 py-0.5 rounded text-[10px] font-bold capitalize ${
+                          log.status === 'delivered' || log.status === 'sent' || log.status === 'simulated'
+                            ? 'bg-emerald-950 text-emerald-300 border border-emerald-800'
+                            : 'bg-red-950 text-red-300'
+                        }`}>
+                          {log.status} ({log.mode})
+                        </span>
+                        <span className="text-slate-500 font-mono text-[10px]">
+                          {new Date(log.timestamp).toLocaleTimeString()}
+                        </span>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+
+            {/* Close Takeover Button */}
+            <div className="flex justify-end pt-2">
+              <Button
+                type="button"
+                variant="secondary"
+                size="md"
+                onClick={() => setSosTakeoverOpen(false)}
+              >
+                Minimize Takeover Window
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Top Header Bar */}
       <div className="flex flex-wrap items-center justify-between gap-3 p-4 bg-industrial-900 border border-industrial-800 rounded-xl shadow-md">
         <div className="flex items-center gap-3">
@@ -434,6 +781,140 @@ export function Command() {
       {/* 2. OVERVIEW TAB: Environment Panel + Workforce Grid + Risk Distribution */}
       {activeTab === 'overview' && (
         <div className="space-y-4">
+          {/* Automatic & Manual Environmental Weather Station (Open-Meteo + ISO 7243) */}
+          <div className="bg-industrial-900 border border-industrial-800 rounded-xl p-4 space-y-3.5 shadow-sm">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-industrial-800 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg bg-sky-950 border border-sky-600/40 flex items-center justify-center text-sky-400">
+                  <Thermometer className="w-4 h-4" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h2 className="text-xs font-bold text-white uppercase tracking-wider">
+                      Site Environmental & Weather Station
+                    </h2>
+                    <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-industrial-950 border border-industrial-700 text-slate-300">
+                      {weatherData?.site_name || 'Apex Smelter'}
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-slate-400">
+                    Open-Meteo 10m background poller with 30m stale fallback and manual ISO 7243 instrument override
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                {/* Mode Switch (Manual vs Automatic) */}
+                <div className="flex items-center bg-industrial-950 border border-industrial-700 rounded-lg p-0.5 text-xs">
+                  <button
+                    type="button"
+                    onClick={() => handleToggleWeatherMode('auto')}
+                    className={`px-2.5 py-1 rounded transition text-xs font-medium ${
+                      weatherMode === 'auto'
+                        ? 'bg-sky-600 text-white font-bold'
+                        : 'text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    Automatic
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleToggleWeatherMode('manual')}
+                    className={`px-2.5 py-1 rounded transition text-xs font-medium ${
+                      weatherMode === 'manual'
+                        ? 'bg-amber-600 text-white font-bold'
+                        : 'text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    Manual
+                  </button>
+                </div>
+
+                {/* Refresh Now Button */}
+                <button
+                  type="button"
+                  onClick={handleRefreshWeather}
+                  disabled={weatherLoading}
+                  className="px-2.5 py-1 rounded-lg bg-industrial-950 border border-industrial-700 hover:border-slate-500 text-slate-200 text-xs font-medium flex items-center gap-1.5 transition"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${weatherLoading ? 'animate-spin text-sky-400' : 'text-slate-400'}`} />
+                  <span>Refresh now</span>
+                </button>
+
+                {/* Log Manual Reading Button */}
+                <button
+                  type="button"
+                  onClick={() => setManualEntryOpen(true)}
+                  className="px-2.5 py-1 rounded-lg bg-amber-950/80 hover:bg-amber-900 border border-amber-600/60 text-amber-200 text-xs font-semibold flex items-center gap-1.5 transition shadow-sm"
+                >
+                  <span>Log Manual Reading</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Active Source Tag, Age, and Manual Countdown */}
+            <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+              <div className="flex items-center gap-2">
+                <span className="text-slate-400 text-[11px]">Active Source:</span>
+                <SourceTag
+                  source={weatherData?.active_source || 'external_verified'}
+                  fetchedAt={weatherData?.fetched_at}
+                  provider={weatherData?.provider || 'Open-Meteo'}
+                  ageSeconds={weatherData?.age_seconds}
+                  isStale={weatherData?.stale}
+                />
+                {weatherData?.age_text && (
+                  <span className="text-[11px] text-slate-400 font-mono">
+                    ({weatherData.age_text})
+                  </span>
+                )}
+              </div>
+
+              {weatherCountdown !== null && weatherCountdown > 0 && (
+                <div className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-amber-950/60 border border-amber-600/50 text-amber-300 font-mono text-[11px]">
+                  <Clock className="w-3.5 h-3.5 text-amber-400" />
+                  <span>Manual Reading Valid: {Math.floor(weatherCountdown / 60)}m {weatherCountdown % 60}s remaining</span>
+                </div>
+              )}
+            </div>
+
+            {/* Live Metrics Grid */}
+            <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 pt-1">
+              <div className="p-2.5 rounded-lg bg-industrial-950 border border-industrial-800">
+                <span className="text-[10px] text-slate-400 block mb-0.5">Dry-Bulb Temp</span>
+                <span className="text-base font-bold font-mono text-white">{weatherData?.temp_c ?? 32.5}°C</span>
+              </div>
+              <div className="p-2.5 rounded-lg bg-industrial-950 border border-industrial-800">
+                <span className="text-[10px] text-slate-400 block mb-0.5">Relative Humidity</span>
+                <span className="text-base font-bold font-mono text-white">{weatherData?.humidity_pct ?? 58}%</span>
+              </div>
+              <div className="p-2.5 rounded-lg bg-industrial-950 border border-industrial-800">
+                <span className="text-[10px] text-slate-400 block mb-0.5">Wind Speed (10m)</span>
+                <span className="text-base font-bold font-mono text-sky-300">{weatherData?.wind_speed_ms ?? 2.1} m/s</span>
+              </div>
+              <div className="p-2.5 rounded-lg bg-industrial-950 border border-industrial-800">
+                <span className="text-[10px] text-slate-400 block mb-0.5">Solar Radiation</span>
+                <span className="text-base font-bold font-mono text-amber-300">{weatherData?.radiation_wm2 ?? 620} W/m²</span>
+              </div>
+              <div className="p-2.5 rounded-lg bg-industrial-950 border border-industrial-800">
+                <span className="text-[10px] text-slate-400 block mb-0.5">
+                  <WbgtLabelWithTooltip isMeasured={weatherData?.is_measured || false} />
+                </span>
+                <span className="text-base font-bold font-mono text-orange-400">{weatherData?.wbgt ?? 29.1}°C</span>
+              </div>
+            </div>
+
+            {/* Limitation Banner */}
+            <div className="p-2 rounded-lg bg-industrial-950 border border-industrial-800/80 text-[11px] text-slate-400 flex items-center justify-between">
+              <span>
+                <strong className="text-slate-300">Limitation:</strong> Weather model value for the site location, not measured at your exact spot.
+              </span>
+              <span className="text-[10px] text-slate-500 font-mono">
+                OSHA / ACGIH / BoM Formula
+              </span>
+            </div>
+          </div>
+
           {/* Environment Panel: 6 Microclimate Zones */}
           <div className="bg-industrial-900 border border-industrial-800 rounded-xl p-3.5 space-y-3">
             <div className="flex items-center justify-between border-b border-industrial-800 pb-2">
