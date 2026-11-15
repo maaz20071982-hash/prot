@@ -51,8 +51,8 @@ export function RiskBadge({ level, size = "md" }) {
   let config = {
     label: "NORMAL (LOW RISK)",
     icon: CheckCircle2,
-    border: "border-emerald-600/50",
-    bg: "bg-emerald-950/40",
+    border: "border-emerald-500/30",
+    bg: "bg-emerald-500/10",
     text: "text-emerald-300",
     iconColor: "text-emerald-400"
   };
@@ -61,8 +61,8 @@ export function RiskBadge({ level, size = "md" }) {
     config = {
       label: "ELEVATED RISK",
       icon: AlertTriangle,
-      border: "border-amber-500/60",
-      bg: "bg-amber-950/50",
+      border: "border-amber-500/35",
+      bg: "bg-amber-500/10",
       text: "text-amber-300",
       iconColor: "text-amber-400"
     };
@@ -70,8 +70,8 @@ export function RiskBadge({ level, size = "md" }) {
     config = {
       label: "HIGH RISK",
       icon: AlertOctagon,
-      border: "border-orange-500/70",
-      bg: "bg-orange-950/50",
+      border: "border-orange-500/40",
+      bg: "bg-orange-500/15",
       text: "text-orange-300",
       iconColor: "text-orange-400"
     };
@@ -80,23 +80,23 @@ export function RiskBadge({ level, size = "md" }) {
     config = {
       label: "POSSIBLE HEAT-RELATED EMERGENCY",
       icon: Flame,
-      border: "border-red-500",
-      bg: "bg-red-950/80 animate-pulse",
-      text: "text-red-200 font-bold",
-      iconColor: "text-red-400"
+      border: "border-rose-500/60 shadow-lg shadow-rose-950/50",
+      bg: "bg-rose-500/20 animate-pulse",
+      text: "text-rose-200 font-bold",
+      iconColor: "text-rose-400"
     };
   }
 
   const IconComponent = config.icon;
   const sizeClasses = size === "sm"
-    ? "px-2 py-0.5 text-xs gap-1.5"
+    ? "px-2.5 py-0.5 text-xs gap-1.5"
     : size === "lg"
-    ? "px-3.5 py-1.5 text-sm gap-2"
-    : "px-2.5 py-1 text-xs gap-1.5";
+    ? "px-4 py-1.5 text-sm gap-2"
+    : "px-3 py-1 text-xs gap-1.5";
 
   return (
     <span
-      className={`inline-flex items-center font-semibold rounded-md border ${config.border} ${config.bg} ${config.text} ${sizeClasses}`}
+      className={`inline-flex items-center font-semibold rounded-full border shadow-sm ${config.border} ${config.bg} ${config.text} ${sizeClasses}`}
       role="status"
       aria-label={`Safety tier: ${config.label}`}
     >
@@ -116,37 +116,37 @@ export function SourceTag({ source, provider = null, age = null, isStale = false
   let badgeProps = {
     icon: Cpu,
     label: "Simulated",
-    classes: "border-purple-600/40 bg-purple-950/40 text-purple-300"
+    classes: "border-purple-500/30 bg-purple-500/10 text-purple-300"
   };
 
   if (s.includes("manual")) {
     badgeProps = {
       icon: FileText,
       label: "Manual Entry",
-      classes: "border-blue-500/50 bg-blue-950/50 text-blue-300"
+      classes: "border-sky-500/30 bg-sky-500/10 text-sky-300"
     };
   } else if (s.includes("import")) {
     badgeProps = {
       icon: Database,
       label: "Imported Feed",
-      classes: "border-cyan-600/40 bg-cyan-950/40 text-cyan-300"
+      classes: "border-cyan-500/30 bg-cyan-500/10 text-cyan-300"
     };
   } else if (s.includes("external") || s.includes("verified")) {
     badgeProps = {
       icon: ShieldCheck,
       label: provider ? `External (${provider})` : "Verified external",
       classes: isStale
-        ? "border-amber-500/60 bg-amber-950/50 text-amber-300"
-        : "border-emerald-500/50 bg-emerald-950/50 text-emerald-300"
+        ? "border-amber-500/40 bg-amber-500/15 text-amber-300"
+        : "border-emerald-500/35 bg-emerald-500/10 text-emerald-300"
     };
   }
 
   const Icon = badgeProps.icon;
-  const sizeClasses = size === "xs" ? "px-1.5 py-0.2 text-[10px]" : "px-2 py-0.5 text-[11px]";
+  const sizeClasses = size === "xs" ? "px-2 py-0.5 text-[10px]" : "px-2.5 py-0.5 text-[11px]";
 
   return (
     <span
-      className={`inline-flex items-center gap-1 rounded font-medium border ${badgeProps.classes} ${sizeClasses}`}
+      className={`inline-flex items-center gap-1 rounded-full font-medium border shadow-sm ${badgeProps.classes} ${sizeClasses}`}
       title={`Data origin: ${badgeProps.label}${isStale ? " (STALE >30m)" : ""}${age ? ` • Age: ${age}` : ""}`}
     >
       <Icon className="w-3 h-3 shrink-0" aria-hidden="true" />
@@ -387,16 +387,16 @@ export function WbgtLabelWithTooltip({ isMeasured = false, value = null, showVal
 }
 
 /**
- * Standard Accessible Industrial Card
+ * Standard Accessible Industrial Card - Bespoke Human-Crafted Aesthetic
  */
 export function Card({ children, className = "", title = null, subtitle = null, action = null }) {
   return (
-    <div className={`bg-industrial-900/90 border border-industrial-700/70 rounded-lg p-4 shadow-sm backdrop-blur-sm ${className}`}>
+    <div className={`bg-industrial-900/90 border border-industrial-800 rounded-xl p-4 sm:p-5 shadow-lg shadow-black/25 ring-1 ring-white/[0.04] backdrop-blur-md transition-all ${className}`}>
       {(title || action) && (
-        <div className="flex items-center justify-between mb-3 border-b border-industrial-800 pb-2">
+        <div className="flex items-center justify-between mb-3 border-b border-industrial-800/80 pb-2.5">
           <div>
-            {title && <h3 className="font-semibold text-slate-100 text-sm tracking-wide">{title}</h3>}
-            {subtitle && <p className="text-xs text-slate-400 mt-0.5">{subtitle}</p>}
+            {title && <h3 className="font-semibold text-zinc-100 text-sm tracking-wide">{title}</h3>}
+            {subtitle && <p className="text-xs text-zinc-400 mt-0.5">{subtitle}</p>}
           </div>
           {action && <div>{action}</div>}
         </div>
@@ -407,7 +407,7 @@ export function Card({ children, className = "", title = null, subtitle = null, 
 }
 
 /**
- * High-Contrast Accessible Button
+ * High-Contrast Accessible Button - Tactile Human-Designed Polish
  */
 export function Button({
   children,
@@ -419,7 +419,7 @@ export function Button({
   type = "button",
   ariaLabel
 }) {
-  const base = "inline-flex items-center justify-center font-medium rounded-md transition-all focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-industrial-950 disabled:opacity-50 disabled:cursor-not-allowed";
+  const base = "inline-flex items-center justify-center font-medium rounded-lg transition-all duration-150 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-industrial-950 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer active:scale-[0.98]";
 
   const sizeClasses = {
     sm: "px-2.5 py-1 text-xs gap-1.5",
@@ -428,12 +428,12 @@ export function Button({
   }[size] || "px-3.5 py-1.5 text-sm gap-2";
 
   const variants = {
-    primary: "bg-sky-600 hover:bg-sky-500 text-white focus:ring-sky-400 border border-sky-500/50 shadow-sm",
-    secondary: "bg-industrial-800 hover:bg-industrial-700 text-slate-200 border border-industrial-600/70 focus:ring-slate-400",
-    danger: "bg-red-700 hover:bg-red-600 text-white border border-red-500 focus:ring-red-400 font-bold",
-    warning: "bg-amber-600 hover:bg-amber-500 text-white border border-amber-400 focus:ring-amber-400",
-    outline: "bg-transparent hover:bg-industrial-800 text-slate-300 border border-industrial-600 focus:ring-slate-400",
-  }[variant] || "bg-sky-600 text-white";
+    primary: "bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-industrial-950 font-bold border border-amber-400/60 shadow-md shadow-amber-950/20 focus:ring-amber-400",
+    secondary: "bg-industrial-850 hover:bg-industrial-800 text-zinc-200 border border-industrial-700/80 hover:border-zinc-500/50 shadow-sm focus:ring-zinc-400",
+    danger: "bg-gradient-to-r from-rose-600 to-red-600 hover:from-rose-500 hover:to-red-500 text-white font-bold border border-rose-400/50 shadow-md shadow-red-950/30 focus:ring-rose-400",
+    warning: "bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-500 hover:to-orange-500 text-white font-semibold border border-amber-400/40 shadow-sm focus:ring-amber-400",
+    outline: "bg-transparent hover:bg-industrial-850 text-zinc-300 border border-industrial-700 hover:border-zinc-500 focus:ring-zinc-400",
+  }[variant] || "bg-gradient-to-r from-amber-500 to-amber-600 text-industrial-950 font-bold";
 
   return (
     <button
@@ -479,14 +479,14 @@ export function Modal({ isOpen, onClose, title, children }) {
 }
 
 /**
- * Form Input Controls
+ * Form Input Controls - Sleek Obsidian & Amber Focus
  */
 export function Input({ label, value, onChange, type = "text", placeholder = "", required = false, hint = null }) {
   return (
     <div className="mb-3">
       {label && (
-        <label className="block text-xs font-medium text-slate-300 mb-1">
-          {label} {required && <span className="text-red-400">*</span>}
+        <label className="block text-xs font-semibold text-zinc-300 mb-1.5">
+          {label} {required && <span className="text-rose-400">*</span>}
         </label>
       )}
       <input
@@ -495,9 +495,9 @@ export function Input({ label, value, onChange, type = "text", placeholder = "",
         onChange={onChange}
         placeholder={placeholder}
         required={required}
-        className="w-full bg-industrial-950 border border-industrial-700 rounded px-3 py-1.5 text-sm text-slate-100 placeholder-slate-500 focus:border-sky-500 focus:outline-none"
+        className="w-full bg-industrial-950/90 border border-industrial-700/80 rounded-lg px-3.5 py-2 text-sm text-zinc-100 placeholder-zinc-500 focus:border-amber-500 focus:ring-1 focus:ring-amber-500/50 focus:outline-none transition-all shadow-inner"
       />
-      {hint && <p className="text-[11px] text-slate-400 mt-1">{hint}</p>}
+      {hint && <p className="text-[11px] text-zinc-400 mt-1">{hint}</p>}
     </div>
   );
 }
@@ -506,18 +506,18 @@ export function Select({ label, value, onChange, options = [], required = false 
   return (
     <div className="mb-3">
       {label && (
-        <label className="block text-xs font-medium text-slate-300 mb-1">
-          {label} {required && <span className="text-red-400">*</span>}
+        <label className="block text-xs font-semibold text-zinc-300 mb-1.5">
+          {label} {required && <span className="text-rose-400">*</span>}
         </label>
       )}
       <select
         value={value}
         onChange={onChange}
         required={required}
-        className="w-full bg-industrial-950 border border-industrial-700 rounded px-3 py-1.5 text-sm text-slate-100 focus:border-sky-500 focus:outline-none"
+        className="w-full bg-industrial-950/90 border border-industrial-700/80 rounded-lg px-3.5 py-2 text-sm text-zinc-100 focus:border-amber-500 focus:ring-1 focus:ring-amber-500/50 focus:outline-none transition-all shadow-inner cursor-pointer"
       >
         {options.map((opt) => (
-          <option key={opt.value} value={opt.value}>
+          <option key={opt.value} value={opt.value} className="bg-industrial-900 text-zinc-100">
             {opt.label}
           </option>
         ))}
@@ -530,8 +530,8 @@ export function Textarea({ label, value, onChange, rows = 3, placeholder = "", r
   return (
     <div className="mb-3">
       {label && (
-        <label className="block text-xs font-medium text-slate-300 mb-1">
-          {label} {required && <span className="text-red-400">*</span>}
+        <label className="block text-xs font-semibold text-zinc-300 mb-1.5">
+          {label} {required && <span className="text-rose-400">*</span>}
         </label>
       )}
       <textarea
@@ -540,7 +540,7 @@ export function Textarea({ label, value, onChange, rows = 3, placeholder = "", r
         rows={rows}
         placeholder={placeholder}
         required={required}
-        className="w-full bg-industrial-950 border border-industrial-700 rounded px-3 py-1.5 text-sm text-slate-100 placeholder-slate-500 focus:border-sky-500 focus:outline-none"
+        className="w-full bg-industrial-950/90 border border-industrial-700/80 rounded-lg px-3.5 py-2 text-sm text-zinc-100 placeholder-zinc-500 focus:border-amber-500 focus:ring-1 focus:ring-amber-500/50 focus:outline-none transition-all shadow-inner"
       />
     </div>
   );
@@ -551,18 +551,18 @@ export function Textarea({ label, value, onChange, rows = 3, placeholder = "", r
  */
 export function StatCard({ label, value, unit = "", subtext = null, icon: Icon = null, alertColor = null }) {
   return (
-    <div className="bg-industrial-900 border border-industrial-800 rounded-lg p-3">
-      <div className="flex items-center justify-between text-slate-400 text-xs mb-1">
-        <span>{label}</span>
-        {Icon && <Icon className="w-4 h-4 text-slate-400" aria-hidden="true" />}
+    <div className="bg-industrial-900/90 border border-industrial-800 rounded-xl p-4 shadow-sm ring-1 ring-white/[0.03] transition-all hover:border-industrial-700">
+      <div className="flex items-center justify-between text-zinc-400 text-xs mb-1.5">
+        <span className="font-medium tracking-wide">{label}</span>
+        {Icon && <Icon className="w-4 h-4 text-zinc-400" aria-hidden="true" />}
       </div>
-      <div className="flex items-baseline gap-1">
-        <span className={`text-xl font-bold font-mono ${alertColor || "text-slate-100"}`}>
+      <div className="flex items-baseline gap-1.5">
+        <span className={`text-2xl font-bold font-mono tracking-tight ${alertColor || "text-zinc-100"}`}>
           {value}
         </span>
-        {unit && <span className="text-xs text-slate-400">{unit}</span>}
+        {unit && <span className="text-xs font-semibold text-zinc-400">{unit}</span>}
       </div>
-      {subtext && <p className="text-[11px] text-slate-400 mt-1">{subtext}</p>}
+      {subtext && <p className="text-[11px] text-zinc-400 mt-1.5">{subtext}</p>}
     </div>
   );
 }

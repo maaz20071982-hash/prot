@@ -208,7 +208,7 @@ export function Auth({ onLoginSuccess }) {
               type="button"
               onClick={() => { setMode('login'); setErrorMsg(''); setSuccessMsg(''); }}
               className={`flex-1 pb-1 text-center border-b-2 transition ${
-                mode === 'login' ? 'border-sky-500 text-sky-400 font-bold' : 'border-transparent text-slate-400 hover:text-slate-200'
+                mode === 'login' ? 'border-amber-500 text-amber-400 font-bold' : 'border-transparent text-zinc-400 hover:text-zinc-200'
               }`}
             >
               Sign In
@@ -217,7 +217,7 @@ export function Auth({ onLoginSuccess }) {
               type="button"
               onClick={() => { setMode('register'); setErrorMsg(''); setSuccessMsg(''); }}
               className={`flex-1 pb-1 text-center border-b-2 transition ${
-                mode === 'register' ? 'border-sky-500 text-sky-400 font-bold' : 'border-transparent text-slate-400 hover:text-slate-200'
+                mode === 'register' ? 'border-amber-500 text-amber-400 font-bold' : 'border-transparent text-zinc-400 hover:text-zinc-200'
               }`}
             >
               Register
@@ -226,7 +226,7 @@ export function Auth({ onLoginSuccess }) {
               type="button"
               onClick={() => { setMode('forgot'); setErrorMsg(''); setSuccessMsg(''); }}
               className={`flex-1 pb-1 text-center border-b-2 transition ${
-                mode === 'forgot' || mode === 'reset' ? 'border-sky-500 text-sky-400 font-bold' : 'border-transparent text-slate-400 hover:text-slate-200'
+                mode === 'forgot' || mode === 'reset' ? 'border-amber-500 text-amber-400 font-bold' : 'border-transparent text-zinc-400 hover:text-zinc-200'
               }`}
             >
               Forgot / Reset
@@ -280,23 +280,23 @@ export function Auth({ onLoginSuccess }) {
             {demoMode && (
               <div className="pt-4 border-t border-industrial-800 space-y-2">
                 <div className="flex items-center justify-between text-xs">
-                  <span className="font-semibold text-slate-300">Try as (Demo Mode Accounts):</span>
+                  <span className="font-semibold text-zinc-300">Try as (Demo Mode Accounts):</span>
                   <span className="text-[10px] text-amber-400 font-mono">1-Click Sign In</span>
                 </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-xs">
                   {DEMO_ACCOUNTS.map((acc) => (
                     <button
                       key={acc.username}
                       type="button"
                       onClick={() => handleTryAs(acc.username, acc.username === 'admin' ? 'admin123' : 'password123')}
                       disabled={loading}
-                      className="p-2.5 rounded-lg bg-industrial-950/80 border border-industrial-800 hover:border-sky-500/70 text-left transition-all group flex flex-col justify-between"
+                      className="p-3 rounded-xl bg-industrial-950/80 border border-industrial-800 hover:border-amber-500/60 hover:bg-industrial-850/60 text-left transition-all duration-150 group flex flex-col justify-between shadow-sm hover:shadow-md hover:shadow-amber-950/20"
                     >
                       <div className="flex items-center justify-between">
-                        <span className="font-bold text-slate-200 group-hover:text-sky-300 text-xs">{acc.label}</span>
-                        <span className="text-[10px] uppercase font-mono px-1 rounded bg-industrial-900 text-slate-400">{acc.role}</span>
+                        <span className="font-bold text-zinc-200 group-hover:text-amber-300 text-xs transition-colors">{acc.label}</span>
+                        <span className="text-[10px] uppercase font-mono px-1.5 py-0.5 rounded-full bg-industrial-900 border border-industrial-800 text-zinc-400">{acc.role}</span>
                       </div>
-                      <span className="text-[11px] text-slate-400 mt-1">{acc.desc}</span>
+                      <span className="text-[11px] text-zinc-400 mt-1.5 leading-relaxed">{acc.desc}</span>
                     </button>
                   ))}
                 </div>

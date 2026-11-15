@@ -110,21 +110,21 @@ export function App() {
       <DemoBanner show={demoMode !== false} />
 
       {/* Main Header */}
-      <header className="bg-industrial-900 border-b border-industrial-800 px-4 py-2.5 sticky top-7 z-40 backdrop-blur-md">
+      <header className="bg-industrial-950/85 border-b border-white/[0.08] px-4 py-2.5 sticky top-7 z-40 backdrop-blur-xl shadow-lg shadow-black/40">
         <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-3">
           {/* Brand Logo & Name */}
           <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-lg bg-gradient-to-tr from-orange-600 to-amber-500 flex items-center justify-center text-white shadow-md shadow-orange-900/30">
-              <Flame className="w-5 h-5" />
+            <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-amber-500 via-orange-600 to-amber-600 flex items-center justify-center text-white shadow-md shadow-amber-950/40 ring-1 ring-white/10">
+              <Flame className="w-5 h-5 text-amber-100" />
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <span className="font-black text-sm tracking-widest text-white">THERMOSENSE</span>
-                <span className="px-1.5 py-0.2 rounded text-[10px] font-mono bg-sky-950 text-sky-400 border border-sky-800">
+                <span className="font-black text-sm tracking-widest text-zinc-100">THERMOSENSE</span>
+                <span className="px-1.5 py-0.2 rounded-full text-[10px] font-mono bg-amber-950/60 text-amber-400 border border-amber-800/50">
                   OCCUPATIONAL HEAT SAFETY
                 </span>
               </div>
-              <p className="text-[10px] text-slate-400">
+              <p className="text-[10px] text-zinc-400">
                 Software-Only Occupational AI Safety Platform (No Hardware)
               </p>
             </div>
@@ -133,27 +133,27 @@ export function App() {
           {/* Top Bar Controls: Site Selector, Live Indicator, Language, Notifications, User Menu */}
           <div className="flex flex-wrap items-center gap-2">
             {/* Site Selector Dropdown */}
-            <div className="flex items-center gap-1.5 bg-industrial-950 border border-industrial-700 rounded-lg px-2.5 py-1 text-xs">
-              <Building2 className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+            <div className="flex items-center gap-1.5 bg-industrial-900 border border-industrial-700/80 rounded-lg px-2.5 py-1 text-xs shadow-inner">
+              <Building2 className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
               <select
                 value={selectedSiteId}
                 onChange={(e) => setSelectedSiteId(e.target.value)}
-                className="bg-transparent text-xs font-semibold text-slate-200 focus:outline-none cursor-pointer"
+                className="bg-transparent text-xs font-semibold text-zinc-200 focus:outline-none cursor-pointer"
                 aria-label="Select Site"
               >
-                <option value="1" className="bg-industrial-900 text-slate-200">Site 1: Apex Smelter (NJ)</option>
-                <option value="2" className="bg-industrial-900 text-slate-200">Site 2: Chicago Metalworks (IL)</option>
+                <option value="1" className="bg-industrial-900 text-zinc-200">Site 1: Apex Smelter (NJ)</option>
+                <option value="2" className="bg-industrial-900 text-zinc-200">Site 2: Chicago Metalworks (IL)</option>
               </select>
             </div>
 
             {/* Live Telemetry Indicator */}
-            <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-950/60 border border-emerald-700/50 text-[11px] font-mono text-emerald-300">
+            <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-950/60 border border-emerald-600/40 text-[11px] font-mono text-emerald-300 shadow-sm">
               <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
               <span>LIVE ENGINE</span>
             </div>
 
             {/* Language Switcher EN / HI / GU */}
-            <div className="flex items-center bg-industrial-950 border border-industrial-700 rounded-lg p-0.5 text-[11px] font-semibold">
+            <div className="flex items-center bg-industrial-900 border border-industrial-700/80 rounded-lg p-0.5 text-[11px] font-semibold">
               {[
                 { code: 'EN', label: 'EN' },
                 { code: 'HI', label: 'HI' },
@@ -165,8 +165,8 @@ export function App() {
                   onClick={() => setLanguage(l.code)}
                   className={`px-2 py-0.5 rounded transition ${
                     language === l.code
-                      ? 'bg-sky-600 text-white font-bold'
-                      : 'text-slate-400 hover:text-slate-200'
+                      ? 'bg-amber-500 text-industrial-950 font-bold shadow-sm'
+                      : 'text-zinc-400 hover:text-zinc-200'
                   }`}
                   title={`Switch language to ${l.label}`}
                 >
@@ -179,19 +179,19 @@ export function App() {
             <button
               type="button"
               onClick={() => setNotificationsOpen(true)}
-              className="relative p-1.5 rounded-lg bg-industrial-950 border border-industrial-700 text-slate-300 hover:text-white transition"
+              className="relative p-1.5 rounded-lg bg-industrial-900 border border-industrial-700/80 text-zinc-300 hover:text-white transition shadow-sm hover:border-amber-500/50"
               title="System Alerts & Notifications"
               aria-label="System Alerts"
             >
               <Bell className="w-4 h-4" />
-              <span className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-orange-500 border-2 border-industrial-900" />
+              <span className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-amber-500 border-2 border-industrial-900" />
             </button>
 
             {/* Dark/Light Theme Toggle (Saved per user) */}
             <button
               type="button"
               onClick={toggleTheme}
-              className="p-1.5 rounded-lg bg-industrial-950 border border-industrial-700 text-slate-300 hover:text-white transition"
+              className="p-1.5 rounded-lg bg-industrial-900 border border-industrial-700/80 text-zinc-300 hover:text-white transition shadow-sm hover:border-amber-500/50"
               title={`Switch to ${theme === 'dark' ? 'Light' : 'Dark'} Theme`}
               aria-label="Toggle Theme"
             >
@@ -208,7 +208,7 @@ export function App() {
                   }
                   navigate('/innovation?tab=walkthrough');
                 }}
-                className="px-2.5 py-1 rounded-lg bg-gradient-to-r from-orange-600 to-amber-600 hover:from-orange-500 hover:to-amber-500 text-white text-xs font-bold shadow-md shadow-orange-950/40 flex items-center gap-1.5 transition-all"
+                className="px-2.5 py-1 rounded-lg bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-400 hover:to-orange-500 text-industrial-950 text-xs font-bold shadow-md shadow-amber-950/40 flex items-center gap-1.5 transition-all"
                 title="Launch End-to-End Judge Walkthrough (Fixed Seed: 42)"
               >
                 <Sparkles className="w-3.5 h-3.5" />
@@ -218,8 +218,8 @@ export function App() {
 
             {/* Quick Demo 4-Role Switcher (Only visible in DEMO_MODE) */}
             {demoMode !== false && (
-              <div className="flex items-center gap-1.5 bg-industrial-950 border border-industrial-700 rounded-lg px-2.5 py-1 text-xs">
-                <span className="text-[11px] text-slate-400 font-semibold hidden md:inline">Demo Role:</span>
+              <div className="flex items-center gap-1.5 bg-industrial-900 border border-industrial-700/80 rounded-lg px-2.5 py-1 text-xs">
+                <span className="text-[11px] text-zinc-400 font-semibold hidden md:inline">Demo Role:</span>
                 <select
                   value={user?.username || 'worker1'}
                   onChange={(e) => {
@@ -229,11 +229,11 @@ export function App() {
                       navigate(getHomeRoute(u.role));
                     }
                   }}
-                  className="bg-transparent text-xs font-semibold text-sky-300 focus:outline-none cursor-pointer"
+                  className="bg-transparent text-xs font-semibold text-amber-300 focus:outline-none cursor-pointer"
                   disabled={loading}
                 >
                   {DEMO_ACCOUNTS.map((acc) => (
-                    <option key={acc.username} value={acc.username} className="bg-industrial-900 text-slate-200">
+                    <option key={acc.username} value={acc.username} className="bg-industrial-900 text-zinc-200">
                       {acc.label}
                     </option>
                   ))}
@@ -245,7 +245,7 @@ export function App() {
             <button
               type="button"
               onClick={() => setStandardsModalOpen(true)}
-              className="text-slate-400 hover:text-slate-200 p-1.5 rounded hover:bg-industrial-800 transition"
+              className="text-zinc-400 hover:text-zinc-200 p-1.5 rounded-lg hover:bg-industrial-800 transition"
               title="View Standards & Cited Sources (Rule 3)"
               aria-label="View Standards and Sources"
             >
@@ -254,14 +254,14 @@ export function App() {
 
             {/* User Profile & Sign Out */}
             <div className="flex items-center gap-1.5 pl-1.5 border-l border-industrial-800">
-              <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
+              <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${
                 userRole === 'admin'
-                  ? 'bg-purple-950 text-purple-300 border border-purple-700'
+                  ? 'bg-purple-950/80 text-purple-300 border border-purple-700/60'
                   : userRole === 'safety_officer'
-                  ? 'bg-emerald-950 text-emerald-300 border border-emerald-700'
+                  ? 'bg-emerald-950/80 text-emerald-300 border border-emerald-700/60'
                   : userRole === 'supervisor'
-                  ? 'bg-sky-950 text-sky-300 border border-sky-700'
-                  : 'bg-slate-800 text-slate-300 border border-slate-700'
+                  ? 'bg-amber-950/80 text-amber-300 border border-amber-700/60'
+                  : 'bg-zinc-800 text-zinc-300 border border-zinc-700'
               }`}>
                 {userRole.replace('_', ' ')}
               </span>
@@ -269,7 +269,7 @@ export function App() {
               <button
                 type="button"
                 onClick={logout}
-                className="text-slate-400 hover:text-red-400 p-1.5 rounded hover:bg-industrial-800 transition"
+                className="text-zinc-400 hover:text-red-400 p-1.5 rounded-lg hover:bg-industrial-850 transition"
                 title="Sign Out"
                 aria-label="Sign Out"
               >
@@ -280,7 +280,7 @@ export function App() {
         </div>
 
         {/* Role-Specific Navigation Tabs */}
-        <div className="max-w-7xl mx-auto mt-2.5 border-t border-industrial-800/80 pt-1.5 flex items-center gap-1 overflow-x-auto">
+        <div className="max-w-7xl mx-auto mt-2.5 border-t border-industrial-800/80 pt-1.5 flex items-center gap-1.5 overflow-x-auto">
           {visibleNavItems.map((item) => {
             const Icon = item.icon;
             const isActive = location.pathname === item.path;
@@ -289,13 +289,13 @@ export function App() {
                 key={item.path}
                 type="button"
                 onClick={() => navigate(item.path)}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium whitespace-nowrap transition-all focus:outline-none focus:ring-1 focus:ring-sky-400 ${
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap transition-all focus:outline-none focus:ring-1 focus:ring-amber-400 ${
                   isActive
-                    ? 'bg-sky-600/20 text-sky-300 border border-sky-500/40 font-semibold'
-                    : 'text-slate-400 hover:text-slate-200 hover:bg-industrial-800/60'
+                    ? 'bg-amber-500/15 text-amber-300 border border-amber-500/40 font-semibold shadow-inner shadow-amber-500/5'
+                    : 'text-zinc-400 hover:text-zinc-200 hover:bg-industrial-850/60'
                 }`}
               >
-                <Icon className={`w-3.5 h-3.5 ${isActive ? 'text-sky-400' : 'text-slate-500'}`} />
+                <Icon className={`w-3.5 h-3.5 ${isActive ? 'text-amber-400' : 'text-zinc-500'}`} />
                 <span>{item.label}</span>
               </button>
             );
