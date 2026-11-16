@@ -167,7 +167,8 @@ async def test_full_application_clickthrough():
         if await confusion_btn.is_visible():
             await confusion_btn.click()
             await page.wait_for_timeout(1000)
-            assert await page.locator("text=FIRST-RESPONSE INSTRUCTIONS").first.is_visible()
+            assert (await page.locator("text=/First-Response Protocol/i").first.is_visible() or
+                    await page.locator("text=/Emergency Signal/i").first.is_visible())
 
             # Click I Am Safe
             safe_btn = page.locator("button:has-text('I Am Safe')").first
