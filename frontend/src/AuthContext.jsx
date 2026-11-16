@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { api } from './api';
+import { safeStorage } from './storage';
 
 const AuthContext = createContext(null);
 
@@ -12,7 +13,7 @@ export const DEMO_ACCOUNTS = [
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
-  const [token, setToken] = useState(localStorage.getItem('thermosense_token'));
+  const [token, setToken] = useState(() => safeStorage.getItem('thermosense_token'));
   const [demoMode, setDemoMode] = useState(true);
   const [loading, setLoading] = useState(true);
 
@@ -53,9 +54,9 @@ export function AuthProvider({ children }) {
 
   const login = async (username, password) => {
     const res = await api.login(username, password);
-    localStorage.setItem('thermosense_token', res.access_token);
+    safeStorage.setItem('thermosense_token', res.access_token);
     if (res.refresh_token) {
-      localStorage.setItem('thermosense_refresh_token', res.refresh_token);
+      safeStorage.setItem('thermosense_refresh_token', res.refresh_token);
     }
     setToken(res.access_token);
     setUser(res.user);
@@ -95,8 +96,8 @@ export function AuthProvider({ children }) {
   };
 
   const logout = () => {
-    localStorage.removeItem('thermosense_token');
-    localStorage.removeItem('thermosense_refresh_token');
+    safeStorage.removeItem('thermosense_token');
+    safeStorage.removeItem('thermosense_refresh_token');
     setToken(null);
     setUser(null);
   };

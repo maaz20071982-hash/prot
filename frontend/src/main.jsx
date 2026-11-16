@@ -3,6 +3,7 @@ import ReactDOM from 'react-dom/client';
 import { BrowserRouter } from 'react-router-dom';
 import { AuthProvider } from './AuthContext';
 import { App } from './App';
+import { safeStorage } from './storage';
 import './index.css';
 
 class ErrorBoundary extends React.Component {
@@ -63,33 +64,58 @@ class ErrorBoundary extends React.Component {
             <p style={{ fontSize: '13px', color: '#a1a1aa', margin: '0 0 20px 0', lineHeight: 1.5 }}>
               A client session state was restored. Click below to refresh and clear any cached parameters.
             </p>
-            <button
-              onClick={() => {
-                try {
-                  localStorage.removeItem('thermosense_token');
-                  localStorage.removeItem('thermosense_refresh_token');
-                } catch (e) {}
-                window.location.href = '/auth';
-              }}
-              style={{
-                backgroundColor: '#f59e0b',
-                color: '#09090b',
-                fontWeight: 'bold',
-                padding: '10px 20px',
-                borderRadius: '8px',
-                border: 'none',
-                cursor: 'pointer',
-                fontSize: '13px'
-              }}
-            >
-              Reset Session & Reload
-            </button>
+            <div style={{ display: 'flex', gap: '10px', justifyContent: 'center' }}>
+              <button
+                onClick={() => {
+                  safeStorage.clear();
+                  window.location.href = '/auth';
+                }}
+                style={{
+                  backgroundColor: '#f59e0b',
+                  color: '#09090b',
+                  fontWeight: 'bold',
+                  padding: '10px 18px',
+                  borderRadius: '8px',
+                  border: 'none',
+                  cursor: 'pointer',
+                  fontSize: '13px'
+                }}
+              >
+                Reset Session & Reload
+              </button>
+              <button
+                onClick={() => {
+                  window.location.reload();
+                }}
+                style={{
+                  backgroundColor: '#27272a',
+                  color: '#f4f4f5',
+                  fontWeight: 'semibold',
+                  padding: '10px 18px',
+                  borderRadius: '8px',
+                  border: '1px solid rgba(255,255,255,0.1)',
+                  cursor: 'pointer',
+                  fontSize: '13px'
+                }}
+              >
+                Reload
+              </button>
+            </div>
           </div>
         </div>
       );
     }
     return this.props.children;
   }
+}
+
+// Safely register PWA Service Worker in secure environments without blocking rendering
+if (typeof window !== 'undefined' && 'serviceWorker' in navigator && window.isSecureContext) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch(() => {
+      // Non-critical: PWA background sync/push worker fallback
+    });
+  });
 }
 
 ReactDOM.createRoot(document.getElementById('root')).render(

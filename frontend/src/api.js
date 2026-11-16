@@ -2,13 +2,14 @@
  * THERMOSENSE API Client (api.js)
  * Wraps backend endpoints with token injection and error handling.
  */
+import { safeStorage } from './storage';
 
 const BASE_URL = (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_API_BASE_URL)
   ? import.meta.env.VITE_API_BASE_URL
   : '/api';
 
 function getAuthHeader() {
-  const token = localStorage.getItem('thermosense_token');
+  const token = safeStorage.getItem('thermosense_token');
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
@@ -35,7 +36,7 @@ async function request(endpoint, options = {}, isRetry = false) {
 
     // 401 Interception: Attempt silent refresh once using stored refresh token
     if (res.status === 401 && !isRetry && !endpoint.includes('/auth/login') && !endpoint.includes('/auth/refresh')) {
-      const refreshToken = localStorage.getItem('thermosense_refresh_token');
+      const refreshToken = safeStorage.getItem('thermosense_refresh_token');
       if (refreshToken) {
         if (!isRefreshing) {
           isRefreshing = true;
@@ -47,20 +48,20 @@ async function request(endpoint, options = {}, isRetry = false) {
             });
             if (refreshRes.ok) {
               const data = await refreshRes.json();
-              localStorage.setItem('thermosense_token', data.access_token);
+              safeStorage.setItem('thermosense_token', data.access_token);
               isRefreshing = false;
               onRefreshed(data.access_token);
               return request(endpoint, options, true);
             } else {
               isRefreshing = false;
-              localStorage.removeItem('thermosense_token');
-              localStorage.removeItem('thermosense_refresh_token');
+              safeStorage.removeItem('thermosense_token');
+              safeStorage.removeItem('thermosense_refresh_token');
               window.dispatchEvent(new Event('thermosense_auth_expired'));
             }
           } catch (e) {
             isRefreshing = false;
-            localStorage.removeItem('thermosense_token');
-            localStorage.removeItem('thermosense_refresh_token');
+            safeStorage.removeItem('thermosense_token');
+            safeStorage.removeItem('thermosense_refresh_token');
             window.dispatchEvent(new Event('thermosense_auth_expired'));
           }
         } else {

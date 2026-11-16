@@ -23,6 +23,7 @@ import {
 } from 'lucide-react';
 import { useAuth, DEMO_ACCOUNTS } from './AuthContext';
 import { DemoBanner, Modal, SafetyFooter, Drawer, Button, RiskBadge } from './ui';
+import { safeStorage } from './storage';
 import { Auth } from './Auth';
 import { Worker } from './Worker';
 import { Command } from './Command';
@@ -41,14 +42,14 @@ export function App() {
   const [selectedSiteId, setSelectedSiteId] = useState('1');
   const [language, setLanguage] = useState('EN');
 
-  // Dark / Light theme toggle saved per user
+  // Dark / Light theme toggle saved per user (using safeStorage)
   const userKey = user?.username || 'anonymous';
   const [theme, setTheme] = useState(() => {
-    return localStorage.getItem(`thermosense_theme_${userKey}`) || 'dark';
+    return safeStorage.getItem(`thermosense_theme_${userKey}`) || 'dark';
   });
 
   useEffect(() => {
-    const saved = localStorage.getItem(`thermosense_theme_${userKey}`) || 'dark';
+    const saved = safeStorage.getItem(`thermosense_theme_${userKey}`) || 'dark';
     setTheme(saved);
     if (saved === 'light') {
       document.documentElement.classList.add('light');
@@ -60,7 +61,7 @@ export function App() {
   const toggleTheme = () => {
     const next = theme === 'dark' ? 'light' : 'dark';
     setTheme(next);
-    localStorage.setItem(`thermosense_theme_${userKey}`, next);
+    safeStorage.setItem(`thermosense_theme_${userKey}`, next);
     if (next === 'light') {
       document.documentElement.classList.add('light');
     } else {
@@ -91,8 +92,22 @@ export function App() {
 
   const visibleNavItems = allNavItems.filter((item) => item.roles.includes(userRole));
 
+  // Loading state: Never show a blank screen while session is being verified
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-industrial-950 text-slate-100 flex flex-col items-center justify-center p-4">
+        <div className="w-12 h-12 rounded-xl bg-gradient-to-tr from-amber-500 via-orange-600 to-amber-600 flex items-center justify-center text-white shadow-lg shadow-amber-950/40 animate-pulse mb-3">
+          <Flame className="w-7 h-7 text-amber-100" />
+        </div>
+        <div className="text-sm font-black tracking-widest text-zinc-100 mb-1">THERMOSENSE</div>
+        <div className="text-xs text-zinc-400 mb-4">Verifying occupational safety session...</div>
+        <div className="w-6 h-6 border-2 border-amber-500/20 border-t-amber-500 rounded-full animate-spin" />
+      </div>
+    );
+  }
+
   // If user is not authenticated and not on /auth, render Auth
-  if (!user && !loading) {
+  if (!user) {
     return (
       <div className="min-h-screen bg-industrial-950 text-slate-100 flex flex-col">
         <DemoBanner show={demoMode !== false} />
